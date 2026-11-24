@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Figma Directory — MoveInSync</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#07090d;--border:rgba(255,255,255,0.07);--text:#e4e4e7;
+    --text-dim:rgba(255,255,255,0.42);--text-muted:rgba(255,255,255,0.26);
+    --wis:#a78bfa;--wis-soft:rgba(139,92,246,0.12);--wis-border:rgba(139,92,246,0.3);
+    --ets:#2dd4bf;--ets-soft:rgba(45,212,191,0.12);--ets-border:rgba(45,212,191,0.3);
+  }
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;-webkit-font-smoothing:antialiased}
+  .wrap{width:100%;max-width:880px}
+  .head{text-align:center;margin-bottom:38px}
+  .head h1{font-size:26px;font-weight:600;letter-spacing:-0.025em;margin-bottom:9px}
+  .head p{font-size:14px;color:var(--text-dim);line-height:1.55}
+
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{display:block;text-decoration:none;color:inherit;border:1px solid var(--border);
+        border-radius:14px;padding:26px 24px 22px;background:rgba(255,255,255,0.015);
+        transition:border-color .16s, background .16s, transform .16s}
+  .card:hover{transform:translateY(-2px)}
+  .card.wis:hover{border-color:var(--wis-border);background:var(--wis-soft)}
+  .card.ets:hover{border-color:var(--ets-border);background:var(--ets-soft)}
+  .card:focus-visible{outline:2px solid var(--text-dim);outline-offset:3px}
+
+  .badge{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+         font-size:12px;font-weight:700;letter-spacing:-0.03em;margin-bottom:16px}
+  .wis .badge{background:linear-gradient(135deg,#a78bfa,#6d28d9);color:#fff}
+  .ets .badge{background:linear-gradient(135deg,#2dd4bf,#0d9488);color:#04201c}
+
+  .card h2{font-size:17px;font-weight:600;margin-bottom:5px;letter-spacing:-0.015em}
+  .card .sub{font-size:12px;margin-bottom:14px}
+  .wis .sub{color:var(--wis)}
+  .ets .sub{color:var(--ets)}
+  .card p{font-size:13px;color:var(--text-dim);line-height:1.6;margin-bottom:16px}
+  .foot{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:7px;min-height:15px}
+  .go{font-size:12px;color:var(--text-dim);margin-top:14px}
+  .card:hover .go{color:var(--text)}
+
+  .note{text-align:center;margin-top:30px;font-size:11.5px;color:var(--text-muted);line-height:1.6}
+  @media(max-width:680px){.cards{grid-template-columns:1fr}body{align-items:flex-start;padding-top:48px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <h1>Figma Directory</h1>
+    <p>Search every MoveInSync design file by screen name, and jump straight to the frame.<br>Pick the product you're looking for.</p>
+  </div>
+
+  <div class="cards">
+
+    <a class="card wis" href="WIS/">
+      <div class="badge">WIS</div>
+      <h2>WorkInSync</h2>
+      <div class="sub">Workplace</div>
+      <p>Desk booking, visitor management, meeting rooms, cafeteria, parking, admin and analytics.</p>
+      <div class="foot" id="wisFoot"></div>
+      <div class="go">Open &rarr;</div>
+    </a>
+
+    <a class="card ets" href="ets/">
+      <div class="badge">ETS</div>
+      <h2>ETS</h2>
+      <div class="sub">Employee Transport</div>
+      <p>Shuttle, routing, scheduling, driver experience, billing, vendor management, safety and MIS 2.0.</p>
+      <div class="foot" id="etsFoot"></div>
+      <div class="go">Open &rarr;</div>
+    </a>
+
+  </div>
+
+  <div class="note">Nobody needs a Figma account to search. You only need one to open a file.</div>
+
+</div>
+
+<script>
+// Each directory writes a tiny status file when it is refreshed. Read those for a
+// file count and a freshness line. If either is missing the card just stays plain.
+function ago(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.floor((Date.now() - d) / 86400000);
+  if (days <= 0) return "updated today";
+  if (days === 1) return "updated yesterday";
+  if (days < 30) return "updated " + days + " days ago";
+  if (days < 365) return "updated " + Math.floor(days / 30) + " months ago";
+  return "updated " + Math.floor(days / 365) + " years ago";
+}
+
+async function status(url, elId) {
+  try {
+    const res = await fetch(url + "?v=" + Date.now());
+    if (!res.ok) return;
+    const s = await res.json();
+    const bits = [];
+    if (typeof s.files === "number") bits.push(s.files + " files");
+    if (s.lastRun) { const a = ago(s.lastRun); if (a) bits.push(a); }
+    if (bits.length) document.getElementById(elId).textContent = bits.join(" · ");
+  } catch (e) { /* no status file yet - leave the card plain */ }
+}
+
+status("WIS/.figdir-state.json", "wisFoot");
+status("ets/.figdir-state.json", "etsFoot");
+</script>
+</body>
+</html>

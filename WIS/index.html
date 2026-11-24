@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkInSync Figma Directory</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{--bg:#0a0a0f;--surface:rgba(255,255,255,0.02);--surface-hover:rgba(139,92,246,0.08);--border:rgba(255,255,255,0.06);--text:#e4e4e7;--text-dim:rgba(255,255,255,0.35);--text-muted:rgba(255,255,255,0.25);--accent:#a78bfa;--accent-dim:rgba(139,92,246,0.2);--accent-border:rgba(139,92,246,0.15);--tag-bg:rgba(139,92,246,0.1);--tag-text:#c4b5fd;--fresh:#10b981;--recent:#60a5fa;--aging:#f59e0b;--stale:#ef4444}
+  body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  .header{border-bottom:1px solid var(--border);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .header-left{display:flex;align-items:center;gap:10px}
+  .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#a78bfa,#6d28d9);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff}
+  .header h1{font-size:18px;font-weight:600;letter-spacing:-0.02em}
+  .header .org{font-size:12px;color:var(--text-dim)}
+  .meta{font-size:11px;color:var(--text-muted)}
+  .filters{padding:16px 24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .search-wrap{position:relative;flex:1 1 260px;min-width:200px}
+  .search-wrap input{width:100%;padding:9px 12px 9px 34px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:var(--text);font-size:13px;outline:none}
+  .search-wrap input:focus{border-color:rgba(139,92,246,0.3)}
+  .search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;opacity:0.3}
+  select{padding:9px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:var(--text);font-size:12px;outline:none}
+  select option{background:#1a1a2e}
+  .stats{padding:0 24px 12px;display:flex;gap:16px;font-size:11px;color:var(--text-muted);flex-wrap:wrap}
+  .dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
+  .file-list{padding:0 24px 24px;display:flex;flex-direction:column;gap:2px}
+  .file-row{display:grid;grid-template-columns:minmax(0,1fr) 150px 100px 50px;gap:12px;align-items:start;padding:12px 16px;background:var(--surface);border-radius:8px;transition:background 0.12s}
+  .file-row:hover{background:var(--surface-hover)}
+  .file-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#f4f4f5;cursor:pointer;text-decoration:none}
+  .file-name:hover{color:var(--accent)}
+  .file-project{font-size:11px;color:var(--text-muted);margin-top:2px}
+  .tag{display:inline-block;padding:3px 8px;background:var(--tag-bg);border:1px solid var(--accent-border);border-radius:5px;font-size:11px;color:var(--tag-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .time{font-size:12px;color:rgba(255,255,255,0.4)}
+  .staleness-dot{width:8px;height:8px;border-radius:50%;display:inline-block;opacity:0.8}
+  .match-info{font-size:11px;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 10px}
+  .match-tag{padding:3px 8px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.25);border-radius:4px;color:var(--tag-text);font-size:11px;cursor:pointer;white-space:nowrap;transition:all 0.2s}
+  .match-tag:hover{background:rgba(139,92,246,0.25)}
+  .no-results{padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px}
+  .empty{padding:80px 24px;text-align:center}
+  .empty-icon{font-size:40px;margin-bottom:16px;opacity:0.3}
+  @media(max-width:700px){
+    .file-row{grid-template-columns:minmax(0,1fr) auto}
+    .file-row>:nth-child(2),.file-row>:nth-child(4){display:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo">F</div>
+    <h1>WorkInSync Figma Directory</h1>
+    <span class="org">MoveInSync</span>
+  </div>
+  <div class="header-right" style="display:flex;align-items:center;gap:10px">
+    <span class="meta" id="metaInfo"></span>
+    <a href="../ets/" style="font-size:11px;color:var(--text-dim);text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px">ETS &rarr;</a>
+    <a href="../" style="font-size:11px;color:var(--text-dim);text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px">All directories</a>
+  </div>
+</div>
+
+<div id="mainContent"></div>
+
+<script>
+const STALE_COLORS = {fresh:"#10b981",recent:"#60a5fa",aging:"#f59e0b",stale:"#ef4444"};
+
+let state = { files: [], search: "", moduleFilter: "All", projectFilter: "All", sortBy: "lastModified", sortDir: "desc" };
+
+async function loadData() {
+  // Relative path: works on GitHub Pages, Netlify, or a local folder.
+  // Cache-buster stops the CDN serving yesterday's index.
+  const url = "figma-directory-data.json?v=" + Date.now();
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    state.files = await res.json();
+    const labels = state.files.reduce((n,f) => n + ((f.labels||[]).length), 0);
+    console.log("Loaded " + state.files.length + " files, " + labels + " labels");
+  } catch (e) {
+    console.error("Load error:", e);
+    document.getElementById("mainContent").innerHTML =
+      '<div class="empty"><div class="empty-icon">\u26a0\ufe0f</div>' +
+      '<div style="font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:6px">Could not load the index</div>' +
+      '<div style="font-size:13px;color:var(--text-muted);max-width:420px;margin:0 auto">' + e.message +
+      '<br><br>figma-directory-data.json must sit next to this page.</div></div>';
+    return;
+  }
+  render();
+}
+
+function timeAgo(d) {
+  if (!d) return "Unknown";
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  const days = Math.floor((Date.now() - dt) / 86400000);
+  if (days < 0) return "Future"; if (days === 0) return "Today"; if (days === 1) return "Yesterday";
+  if (days < 7) return days+"d ago"; if (days < 30) return Math.floor(days/7)+"w ago";
+  if (days < 365) return Math.floor(days/30)+"mo ago"; return Math.floor(days/365)+"y ago";
+}
+
+function staleness(d) {
+  if (!d) return "stale";
+  const dt = new Date(d);
+  if (isNaN(dt)) return "stale";
+  const days = Math.floor((Date.now() - dt) / 86400000);
+  if (days < 30) return "fresh"; if (days < 90) return "recent"; if (days < 180) return "aging"; return "stale";
+}
+
+function openNode(fileId, nodeId) {
+  if (!nodeId) { alert("This label has no node id. Re-index the file."); return; }
+  // Figma deep links use dashes in node ids
+  const url = "https://www.figma.com/design/" + fileId + "?node-id=" + String(nodeId).replace(/:/g, "-");
+  window.open(url, "_blank", "noopener");
+}
+
+// Split the query into terms; a record matches only if it contains ALL of them.
+function terms(q) {
+  return (q || "").toLowerCase().split(/\s+/).filter(t => t.length > 0);
+}
+function matchesAll(haystack, ts) {
+  const h = (haystack || "").toLowerCase();
+  return ts.every(t => h.includes(t));
+}
+
+function getFiltered() {
+  const q = state.search.toLowerCase();
+  return state.files.filter(f => {
+    const ts = terms(q);
+    const ms = !ts.length
+      || matchesAll(f.searchText, ts)
+      || matchesAll((f.module || "") + " " + (f.projectName || ""), ts);
+    const mm = state.moduleFilter === "All" || f.module === state.moduleFilter;
+    const mp = state.projectFilter === "All" || f.projectName === state.projectFilter;
+    return ms && mm && mp;
+  }).sort((a,b) => {
+    let c = 0;
+    if (state.sortBy === "lastModified") c = new Date(a.lastModified||0) - new Date(b.lastModified||0);
+    else if (state.sortBy === "name") c = (a.name||"").localeCompare(b.name||"");
+    else if (state.sortBy === "project") c = (a.projectName||"").localeCompare(b.projectName||"");
+    else if (state.sortBy === "module") c = (a.module||"").localeCompare(b.module||"");
+    return state.sortDir === "desc" ? -c : c;
+  });
+}
+
+function render() {
+  if (state.files.length === 0) {
+    document.getElementById("mainContent").innerHTML = '<div class="empty"><div class="empty-icon">📁</div><div style="font-size:15px;color:rgba(255,255,255,0.5)">No files</div></div>';
+    return;
+  }
+
+  const modules = [...new Set(state.files.map(f=>f.module))].sort();
+  const projects = [...new Set(state.files.map(f=>f.projectName).filter(Boolean))].sort();
+
+  let h = '<div class="filters">';
+  h += '<div class="search-wrap"><span class="search-icon">🔍</span><input id="searchInput" type="text" placeholder="Search titles, sections, pages, files\u2026  \u2318K" value="'+(state.search||"")+'" oninput="state.search=this.value;renderList()"></div>';
+  h += '<select id="moduleSelect" onchange="state.moduleFilter=this.value;renderList()"><option value="All">All Modules</option>';
+  for (const m of modules) h += '<option value="'+m+'"'+(state.moduleFilter===m?' selected':'')+'>'+m+'</option>';
+  h += '</select>';
+  h += '<select id="projectSelect" onchange="state.projectFilter=this.value;renderList()"><option value="All">All Projects</option>';
+  for (const p of projects) h += '<option value="'+p.replace(/"/g,'&quot;')+'"'+(state.projectFilter===p?' selected':'')+'>'+p+'</option>';
+  h += '</select>';
+  h += '<select id="sortSelect" onchange="var v=this.value.split(\'-\');state.sortBy=v[0];state.sortDir=v[1];renderList()">';
+  for (const [val,label] of [["lastModified-desc","Latest first"],["lastModified-asc","Oldest first"],["name-asc","Name A→Z"],["name-desc","Name Z→A"],["module-asc","Module A→Z"]]) {
+    h += '<option value="'+val+'"'+(state.sortBy+'-'+state.sortDir===val?' selected':'')+'>'+label+'</option>';
+  }
+  h += '</select></div>';
+
+  h += '<div class="stats"><span id="filterCount"></span><span><span class="dot" style="background:var(--fresh)"></span>Fresh (&lt;30d)</span><span><span class="dot" style="background:var(--recent)"></span>Recent (1-3mo)</span><span><span class="dot" style="background:var(--aging)"></span>Aging (3-6mo)</span><span><span class="dot" style="background:var(--stale)"></span>Stale (6mo+)</span></div>';
+
+  h += '<div class="file-list" id="fileList"></div>';
+
+  document.getElementById("mainContent").innerHTML = h;
+  document.getElementById("metaInfo").textContent = state.files.length + " files";
+  
+  renderList();
+  
+  document.addEventListener("keydown", e => {
+    if ((e.metaKey||e.ctrlKey) && e.key === "k") { e.preventDefault(); document.getElementById("searchInput")?.focus(); }
+  });
+}
+
+function renderList() {
+  const filtered = getFiltered();
+  const el = document.getElementById("fileList");
+  const statsEl = document.getElementById("filterCount");
+  
+  if (!el) return;
+  
+  if (statsEl) statsEl.textContent = filtered.length + ' of ' + state.files.length + ' files';
+  
+  if (filtered.length === 0) { el.innerHTML = '<div class="no-results">No files match.</div>'; return; }
+
+  const q = state.search.toLowerCase();
+  let h = '';
+  for (const f of filtered) {
+    const s = staleness(f.lastModified);
+    const esc = t => (t||"").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const cleanLink = (f.link || "").split("?")[0];
+
+    let matchInfo = '';
+    const ts = terms(q);
+    if (ts.length && (f.labels || []).length) {
+      const pageName = {};
+      for (const p of (f.pagesData || [])) pageName[p.id] = p.name;
+
+      const hits = f.labels.filter(l => matchesAll(l.t, ts));
+      if (hits.length) {
+        const SHOW = 10;
+        matchInfo = '<div class="match-info" style="margin-top:7px;display:flex;flex-wrap:wrap;gap:6px">';
+        for (const l of hits.slice(0, SHOW)) {
+          const pg = pageName[l.p] ? ' \u00b7 ' + esc(pageName[l.p]) : '';
+          matchInfo += '<span title="Open in Figma" onclick="openNode(\'' + esc(f.id) + '\',\'' + esc(l.id) + '\')"' +
+            ' style="padding:4px 9px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.3);' +
+            'border-radius:5px;color:var(--tag-text);font-size:11px;cursor:pointer;white-space:nowrap">' +
+            esc(l.t) + '<span style="color:var(--text-muted)">' + pg + '</span></span>';
+        }
+        if (hits.length > SHOW) {
+          matchInfo += '<span style="font-size:11px;color:var(--text-muted);align-self:center">+' +
+            (hits.length - SHOW) + ' more</span>';
+        }
+        matchInfo += '</div>';
+      }
+    }
+
+    h += '<div class="file-row">';
+    h += '<div style="min-width:0"><a href="'+esc(cleanLink)+'" target="_blank" rel="noopener" class="file-name">'+esc(f.name)+'</a><div class="file-project">'+esc(f.projectName)+'</div>'+matchInfo+'</div>';
+    h += '<div style="padding-top:2px"><span class="tag">'+(f.module||"Other")+'</span></div>';
+    h += '<div class="time">'+timeAgo(f.lastModified)+'</div>';
+    h += '<div style="display:flex;justify-content:flex-end;padding-top:4px"><span class="staleness-dot" style="background:'+STALE_COLORS[s]+'"></span></div>';
+    h += '</div>';
+  }
+  el.innerHTML = h;
+}
+
+loadData();
+</script>
+</body>
+</html>

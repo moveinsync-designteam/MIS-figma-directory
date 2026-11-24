@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "product": "ETS",
+  "_readme": "ETS Figma Directory. Each entry in \"folders\" is a Figma folder; every file inside it is indexed automatically, so adding a Figma file to the folder is all a designer has to do. The folder's \"module\" becomes the Module filter in the directory; subfolders inside it become the Project tag. To add a folder, copy its URL from Figma and paste a new entry below. Set \"recursive\": false to index only the files sitting directly in a folder. If one file sits in two folders it is indexed once, tagged by whichever folder is listed first here. Use \"files\" for one-off files outside these folders, or to override the module/project of one file (match it by \"id\", the file key). The Figma token needs the folders:read scope as well as file content read.",
+  "folders": [
+    {
+      "link": "https://www.figma.com/files/folder/34150877",
+      "module": "ETS",
+      "projectName": "ETS",
+      "_approxFiles": 71
+    },
+    {
+      "link": "https://www.figma.com/files/folder/183221829",
+      "module": "MDS - Vendor Experience",
+      "projectName": "MDS - Vendor Experience",
+      "_approxFiles": 1
+    },
+    {
+      "link": "https://www.figma.com/files/folder/205125927",
+      "module": "Routing",
+      "projectName": "Routing",
+      "_approxFiles": 2
+    },
+    {
+      "link": "https://www.figma.com/files/folder/200382279",
+      "module": "Ticket Management",
+      "projectName": "Ticket Management",
+      "_approxFiles": 2
+    },
+    {
+      "link": "https://www.figma.com/files/folder/209041589",
+      "module": "Security & Compliance",
+      "projectName": "Security & Compliance",
+      "_approxFiles": 2
+    },
+    {
+      "link": "https://www.figma.com/files/folder/75122216",
+      "module": "Rentlz",
+      "projectName": "Rentlz",
+      "_approxFiles": 3
+    },
+    {
+      "link": "https://www.figma.com/files/folder/258402418",
+      "module": "MIS 2.0",
+      "projectName": "MIS 2.0",
+      "_approxFiles": 4
+    },
+    {
+      "link": "https://www.figma.com/files/folder/301588269",
+      "module": "Driver XP",
+      "projectName": "Driver XP",
+      "_approxFiles": 5
+    },
+    {
+      "link": "https://www.figma.com/files/folder/95154451",
+      "module": "Reporting & Analytics",
+      "projectName": "Reporting & Analytics",
+      "_approxFiles": 5
+    },
+    {
+      "link": "https://www.figma.com/files/folder/205125423",
+      "module": "Billing",
+      "projectName": "Billing",
+      "_approxFiles": 11
+    },
+    {
+      "link": "https://www.figma.com/files/folder/75566760",
+      "module": "Shuttle",
+      "projectName": "Shuttle",
+      "_approxFiles": 24
+    },
+    {
+      "link": "https://www.figma.com/files/folder/22565526",
+      "module": "Mobile Experience",
+      "projectName": "Mobile Experience",
+      "_approxFiles": 33
+    }
+  ],
+  "files": [],
+  "labels": [
+    "for internal use",
+    "section-titles",
+    "section-titles-lg",
+    "sub section header",
+    "page-titles"
+  ],
+  "excludes": [
+    "graveyard",
+    "experiments",
+    "earlier versions",
+    "inspiration",
+    "sandbox",
+    "archive",
+    "deprecated"
+  ],
+  "indexWords": true
+}
