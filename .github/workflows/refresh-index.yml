@@ -1,0 +1,134 @@
+name: Refresh Figma index
+
+# Two directories live in this repo:
+#   /WIS         WorkInSync  (seeded from the original repo; refreshed only when you ask)
+#   /ets         ETS         (indexed on the schedule)
+
+on:
+  # Every night at 02:00 IST (20:30 UTC) - ETS only.
+  schedule:
+    - cron: "30 20 * * *"
+  # Editing a config re-indexes just that directory.
+  push:
+    paths:
+      - "ets/figma-directory-config.json"
+      - "WIS/figma-directory-config.json"
+      - "scripts/build-index.mjs"
+  # "Run workflow" button in the Actions tab.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which directory to refresh"
+        type: choice
+        options: ["ets", "workinsync", "both"]
+        default: "ets"
+      full:
+        description: "Re-index every file, even unchanged ones"
+        type: boolean
+        default: false
+      only:
+        description: "Only this file (part of its name). Blank = all."
+        type: string
+        default: ""
+      module:
+        description: "Only this module, e.g. Shuttle. Use this to index one module at a time on the first run."
+        type: string
+        default: ""
+      count_only:
+        description: "Count the files in each folder and stop. Indexes nothing, writes nothing."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: figma-index
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Scheduled runs and config pushes have no inputs.target, so work it out here.
+      - name: Decide what to refresh
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          TARGET_IN: ${{ inputs.target }}
+          CHANGED: ${{ join(github.event.commits.*.modified, ' ') }}${{ join(github.event.commits.*.added, ' ') }}
+        run: |
+          target="$TARGET_IN"
+          if [ -z "$target" ]; then
+            case "$EVENT" in
+              schedule) target="ets" ;;
+              push)
+                e=""; w=""
+                case "$CHANGED" in *"ets/figma-directory-config.json"*) e=1 ;; esac
+                case "$CHANGED" in *"WIS/figma-directory-config.json"*) w=1 ;; esac
+                if [ -n "$e" ] && [ -n "$w" ]; then target="both"
+                elif [ -n "$w" ]; then target="workinsync"
+                else target="ets"; fi ;;
+              *) target="ets" ;;
+            esac
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "Refreshing: $target"
+
+      - name: Index ETS
+        if: contains(fromJSON('["ets","both"]'), steps.plan.outputs.target)
+        env:
+          FIGMA_TOKEN:  ${{ secrets.FIGMA_TOKEN }}
+          CONFIG_PATH:  ets/figma-directory-config.json
+          DATA_PATH:    ets/figma-directory-data.json
+          STATE_PATH:   ets/.figdir-state.json
+          FULL_REINDEX: ${{ inputs.full }}
+          ONLY:         ${{ inputs.only }}
+          ONLY_MODULE:  ${{ inputs.module }}
+          COUNT_ONLY:   ${{ inputs.count_only }}
+        run: node scripts/build-index.mjs
+
+      # Off the schedule on purpose: the live WorkInSync index only moves when asked.
+      - name: Index WorkInSync
+        if: contains(fromJSON('["workinsync","both"]'), steps.plan.outputs.target)
+        env:
+          FIGMA_TOKEN:  ${{ secrets.FIGMA_TOKEN }}
+          CONFIG_PATH:  WIS/figma-directory-config.json
+          DATA_PATH:    WIS/figma-directory-data.json
+          STATE_PATH:   WIS/.figdir-state.json
+          FULL_REINDEX: ${{ inputs.full }}
+          ONLY:         ${{ inputs.only }}
+          ONLY_MODULE:  ${{ inputs.module }}
+          COUNT_ONLY:   ${{ inputs.count_only }}
+        run: node scripts/build-index.mjs
+
+      # Runs even if some files failed, so everything that succeeded still goes live.
+      - name: Publish to the site
+        if: always() && inputs.count_only != true
+        run: |
+          git config user.name  "figma-directory-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for f in ets/figma-directory-data.json ets/.figdir-state.json \
+                   WIS/figma-directory-data.json WIS/.figdir-state.json; do
+            [ -f "$f" ] && git add "$f"
+          done
+          if git diff --cached --quiet; then
+            echo "Nothing changed - site left as is."
+            exit 0
+          fi
+          git commit -m "Refresh Figma index (${{ steps.plan.outputs.target }})"
+          git pull --rebase
+          git push
+
+      - name: Rebuild GitHub Pages
+        if: always() && inputs.count_only != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" >/dev/null || echo "Pages will pick up the commit on its own."
