@@ -115,9 +115,10 @@ jobs:
         run: |
           git config user.name  "figma-directory-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for f in ets/figma-directory-data.json ets/.figdir-state.json \
-                   WIS/figma-directory-data.json WIS/.figdir-state.json; do
-            [ -f "$f" ] && git add "$f"
+          # -A also stages the removal of the old plaintext .json files
+          for f in ets/figma-directory-data.bin ets/figma-directory-data.json ets/.figdir-state.json \
+                   WIS/figma-directory-data.bin WIS/figma-directory-data.json WIS/.figdir-state.json; do
+            git add -A -- "$f" 2>/dev/null || true
           done
           if git diff --cached --quiet; then
             echo "Nothing changed - site left as is."
