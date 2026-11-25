@@ -175,7 +175,9 @@ function pvShow(i) {
   if (!f) return;
   const first = (f.labels || [])[0];
   const s = { t: f.name, fileName: f.projectName || "", page: first ? first.t : "",
-              fileId: f.id, nodeId: first ? first.id : "" };
+              fileId: f.id,
+              // the section the heading titles, else its page - never the heading itself
+              nodeId: first ? (first.c || first.p || first.id) : "" };
   clearTimeout(pvHideTimer);
   if (pvCur === i) return;
   pvCur = i;

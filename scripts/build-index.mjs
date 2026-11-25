@@ -99,16 +99,23 @@ function collectWords(text, acc) {
   }
 }
 
-function walkSubtree(node, page, acc) {
+function walkSubtree(node, page, acc, ctx) {
   if (!node) return;
   if ((node.type === "SECTION" || node.type === "FRAME") && isExcludedName(node.name)) { acc.excluded++; return; }
+  // A SECTION is what a heading titles, so it is what a preview should show.
+  if (node.type === "SECTION") ctx = { id: node.id, name: node.name || "" };
   if (node.type === "TEXT" && node.characters) collectWords(node.characters, acc);
   if (isLabelNode(node)) {
     const text = labelText(node, []).join(" ").slice(0, 200).trim();
-    if (text) { acc.labels.push({ t: text, id: node.id, p: page.id }); collectWords(text, acc); }
+    if (text) {
+      const l = { t: text, id: node.id, p: page.id };
+      if (ctx && ctx.id && ctx.id !== node.id) { l.c = ctx.id; l.cn = (ctx.name || "").slice(0, 70); }
+      acc.labels.push(l);
+      collectWords(text, acc);
+    }
     return;
   }
-  if (node.children) for (const c of node.children) walkSubtree(c, page, acc);
+  if (node.children) for (const c of node.children) walkSubtree(c, page, acc, ctx);
 }
 
 /* ---------- network ---------- */
@@ -165,7 +172,7 @@ async function harvest(fileKey, ids, page, acc) {
     const nodes = await nodesFetch(fileKey, ids, null);
     for (const id of ids) {
       const d = nodes[id] && nodes[id].document;
-      if (d) walkSubtree(d, page, acc);
+      if (d) walkSubtree(d, page, acc, { id: d.id, name: d.name || "" });
     }
     return;
   } catch (e) {

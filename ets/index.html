@@ -195,6 +195,10 @@ function buildScreenIndex() {
         t: l.t,
         tl: l.t.toLowerCase(),
         nodeId: l.id,
+        // what the preview should show: the section this heading titles, else its
+        // page. The heading node itself is a few words of text and shows nothing.
+        previewId: l.c || l.p || l.id,
+        sectionName: l.cn || "",
         page: pn[l.p] || "",
         fileId: f.id,
         fileName: f.name || "",
@@ -477,12 +481,14 @@ function pvShow(i) {
 
   const el = pvEl();
   el.querySelector("#pvT").textContent = s.t;
-  el.querySelector("#pvS").textContent = s.fileName + (s.page ? " · " + s.page : "");
+  el.querySelector("#pvS").textContent =
+    (s.sectionName ? s.sectionName + " · " : "") + s.fileName + (s.page ? " · " + s.page : "");
   const body = el.querySelector("#pvB");
   body.innerHTML = '<div class="pv-msg">Loading the frame from Figma…</div>';
   el.classList.add("on");
 
-  if (!s.nodeId) { body.innerHTML = '<div class="pv-msg">No frame id on this screen — re-index the file.</div>'; return; }
+  const target = s.previewId || s.nodeId;
+  if (!target) { body.innerHTML = '<div class="pv-msg">No frame id on this screen — re-index the file.</div>'; return; }
 
   // A fresh iframe each time: swapping src on one pollutes browser history.
   const f = document.createElement("iframe");
@@ -490,7 +496,7 @@ function pvShow(i) {
   f.allowFullscreen = true;
   f.referrerPolicy = "no-referrer-when-downgrade";
   f.src = "https://embed.figma.com/design/" + s.fileId +
-          "?node-id=" + String(s.nodeId).replace(/:/g, "-") +
+          "?node-id=" + String(target).replace(/:/g, "-") +
           "&embed-host=" + PV_HOST + "&theme=dark&footer=false&page-selector=false";
   f.addEventListener("load", () => { const m = body.querySelector(".pv-msg"); if (m) m.remove(); });
   body.appendChild(f);
