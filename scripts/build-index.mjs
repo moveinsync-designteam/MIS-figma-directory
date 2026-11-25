@@ -45,6 +45,13 @@ if (!TOKEN) {
 const skips = (Array.isArray(config.skip) ? config.skip : [])
   .map(x => String(x || "").toLowerCase().trim()).filter(Boolean);
 
+// Whole files whose name contains any of these are never indexed: dumps, deprecated
+// copies, experiments and the like, which only add noise to a search.
+const DEFAULT_EXCLUDE_FILES = ["deprecated", "depreceated", "dump", "experiment",
+  "graveyard", "sandbox", "archive", "untitled", "backup", "trash", "scrap"];
+const excludeFiles = (Array.isArray(config.excludeFiles) ? config.excludeFiles : DEFAULT_EXCLUDE_FILES)
+  .map(x => String(x || "").toLowerCase().trim()).filter(Boolean);
+
 const settings = {
   labels:     (config.labels && config.labels.length ? config.labels : DEFAULT_LABELS).map(norm),
   excludes:   (Array.isArray(config.excludes) ? config.excludes : DEFAULT_EXCLUDES).map(norm),
@@ -457,6 +464,7 @@ const cleanDiscovery = discoveryNotes.length === 0;
 
 const entries = [];
 const skipped = [];
+const excludedFiles = [];
 const byId = new Map();
 // Explicit "files" entries come last so they can re-tag a file a folder brought in.
 for (const f of [...discovered, ...(Array.isArray(config.files) ? config.files : [])]) {
@@ -472,6 +480,12 @@ for (const f of [...discovered, ...(Array.isArray(config.files) ? config.files :
   if (skips.some(sk => hay.some(h => h === sk || (sk.length > 3 && h.includes(sk))))) {
     console.log("Skipping (listed in \"skip\"): " + (e.name || id));
     skipped.push(e.name || id);
+    continue;
+  }
+  const nm = String(e.name || "").toLowerCase();
+  const junk = nm && excludeFiles.find(x => nm.includes(x));
+  if (junk) {
+    excludedFiles.push(e.name + " (" + junk + ")");
     continue;
   }
   byId.set(id, e);
@@ -599,6 +613,10 @@ const summary = [
     (failed ? ", **" + failed + " failed**" : ""),
   stoppedBy ? "\n**Run stopped early:** " + stoppedBy + "\n" : "",
   skipped.length ? "\nSkipped by config: " + skipped.join(", ") + "\n" : "",
+  excludedFiles.length
+    ? "\n" + excludedFiles.length + " file(s) left out as dumps/deprecated/experiments: " +
+      excludedFiles.slice(0, 12).join(", ") + (excludedFiles.length > 12 ? ", \u2026" : "") + "\n"
+    : "",
   openShared.length
     ? "\n### \u26a0\ufe0f " + openShared.length + " file(s) are shared with anyone who has the link\n\n" +
       "This directory publishes file keys, so these designs are reachable by anyone who finds it. " +

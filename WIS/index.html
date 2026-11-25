@@ -154,19 +154,16 @@ function pvEl() {
     '<div class="pv-body" id="pvB"></div>' +
     '<div class="pv-foot">Live from Figma · sign in to Figma if it stays blank</div>';
   document.body.appendChild(el);
-  el.addEventListener("mouseenter", () => clearTimeout(pvHideTimer));
-  el.addEventListener("mouseleave", pvHide);
+
   el.querySelector("#pvX").addEventListener("click", () => { pvSet(false); pvHide(); });
   return el;
 }
 
 function pvHide() {
   clearTimeout(pvTimer);
-  pvHideTimer = setTimeout(() => {
-    const el = document.getElementById("pv");
-    if (el) { el.classList.remove("on"); el.querySelector("#pvB").innerHTML = ""; }
-    pvCur = -1;
-  }, 180);
+  const el = document.getElementById("pv");
+  if (el) { el.classList.remove("on"); el.querySelector("#pvB").innerHTML = ""; }
+  pvCur = -1;
 }
 
 function pvShow(i) {
@@ -209,13 +206,10 @@ function pvQueue(i) {
   pvTimer = setTimeout(() => pvShow(i), 420);   // don't fire while skimming
 }
 
-document.addEventListener("mouseover", e => {
+document.addEventListener("click", e => {
+  if (e.target.closest(".pv") || e.target.closest("a") || e.target.closest("[onclick]")) return;
   const row = e.target.closest(".file-row");
-  if (row && row.dataset.i !== undefined) pvQueue(Number(row.dataset.i));
-});
-document.addEventListener("mouseout", e => {
-  const row = e.target.closest(".file-row");
-  if (row && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".file-row, .pv"))) pvHide();
+  if (row && row.dataset.i !== undefined) pvShow(Number(row.dataset.i));
 });
 
 function timeAgo(d) {

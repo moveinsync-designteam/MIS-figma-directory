@@ -96,5 +96,18 @@
   "indexWords": true,
   "skip": [
     "Prototype MIS 2.0"
+  ],
+  "excludeFiles": [
+    "deprecated",
+    "depreceated",
+    "dump",
+    "experiment",
+    "graveyard",
+    "sandbox",
+    "archive",
+    "untitled",
+    "backup",
+    "trash",
+    "scrap"
   ]
 }
