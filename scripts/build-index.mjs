@@ -7,11 +7,15 @@
 //         .figdir-state.json            (bookkeeping: lets unchanged files be skipped)
 
 import fs from "node:fs";
+import zlib from "node:zlib";
 import crypto from "node:crypto";
 
 const CONFIG_PATH = process.env.CONFIG_PATH || "figma-directory-config.json";
 const DATA_PATH   = process.env.DATA_PATH   || "figma-directory-data.json";
 const STATE_PATH  = process.env.STATE_PATH  || ".figdir-state.json";
+// The published index is a gzipped blob, not readable JSON: it stays out of
+// search results and out of casual view in a public repo.
+const BIN_PATH    = DATA_PATH.replace(/\.json$/, "") + ".bin";
 const TOKEN       = (process.env.FIGMA_TOKEN || "").trim();
 const FULL        = String(process.env.FULL_REINDEX || "").toLowerCase() === "true";
 const ONLY        = (process.env.ONLY || "").trim().toLowerCase();
@@ -48,7 +52,12 @@ const settings = {
 };
 const settingsHash = crypto.createHash("sha1").update(JSON.stringify(settings)).digest("hex").slice(0, 12);
 
-const prevData  = readJson(DATA_PATH, []);
+function readData() {
+  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(BIN_PATH)).toString("utf8")); }
+  catch { return readJson(DATA_PATH, []); }   // falls back to a pre-blob data file
+}
+
+const prevData  = readData();
 const prevById  = new Map((Array.isArray(prevData) ? prevData : []).map(f => [f.id, f]));
 const prevState = readJson(STATE_PATH, {});
 const settingsChanged = prevState.settingsHash && prevState.settingsHash !== settingsHash;
@@ -250,6 +259,7 @@ async function indexOne(entry) {
       projectName: entry.projectName || "Untagged",
       module: entry.module || "Other",
       lastModified: meta.lastModified || "",
+      linkAccess: meta.linkAccess || "",
       link: entry.link || ("https://www.figma.com/design/" + fileKey),
       pages: pagesData.map(p => p.name),
       pagesData,
@@ -488,13 +498,15 @@ function assemble(partial) {
 }
 
 function writeOutputs(records) {
-  const json = JSON.stringify(records);
-  fs.writeFileSync(DATA_PATH + ".tmp", json);
-  fs.renameSync(DATA_PATH + ".tmp", DATA_PATH);
+  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(records)), { level: 9 });
+  fs.writeFileSync(BIN_PATH + ".tmp", gz);
+  fs.renameSync(BIN_PATH + ".tmp", BIN_PATH);
+  // never leave a readable copy behind in the repo
+  try { if (fs.existsSync(DATA_PATH)) fs.unlinkSync(DATA_PATH); } catch {}
   fs.writeFileSync(STATE_PATH, JSON.stringify({
     settingsHash, lastRun: new Date().toISOString(), files: records.length
   }, null, 2) + "\n");
-  return json.length;
+  return gz.length;
 }
 
 const results = new Map();     // id -> record, in config order at the end
@@ -528,6 +540,7 @@ for (let i = 0; i < entries.length; i++) {
       const head = await figmaGet(API + "/v1/files/" + entry.id + "?depth=1");
       if (head.lastModified && head.lastModified === prev.lastModified) {
         results.set(entry.id, { ...prev, name: head.name || prev.name,
+          linkAccess: head.linkAccess || prev.linkAccess || "",
           projectName: entry.projectName || "Untagged", module: entry.module || "Other", link: entry.link || prev.link });
         report.push([tag, tagsChanged(prev, entry) ? "unchanged - tags updated" : "unchanged"]);
         console.log(tag + " - unchanged");
@@ -566,6 +579,11 @@ const finalRecords = assemble(false);
 const bytes = writeOutputs(finalRecords);
 const removed = cleanDiscovery ? [...prevById.keys()].filter(id => !seenIds.has(id)).length : 0;
 
+// "view"/"edit" mean anyone with the link can open the file. The org-scoped
+// values and "inherit" are fine. Publishing a file key only matters for these.
+const OPEN_SHARE = { view: 1, edit: 1 };
+const openShared = finalRecords.filter(r => OPEN_SHARE[String(r.linkAccess || "").toLowerCase()]);
+
 const summary = [
   "## Figma Directory refresh",
   "",
@@ -574,6 +592,12 @@ const summary = [
     (failed ? ", **" + failed + " failed**" : ""),
   stoppedBy ? "\n**Run stopped early:** " + stoppedBy + "\n" : "",
   skipped.length ? "\nSkipped by config: " + skipped.join(", ") + "\n" : "",
+  openShared.length
+    ? "\n### \u26a0\ufe0f " + openShared.length + " file(s) are shared with anyone who has the link\n\n" +
+      "This directory publishes file keys, so these designs are reachable by anyone who finds it. " +
+      "Change them to org-only in Figma's Share dialog if that is not intended.\n\n" +
+      openShared.map(r => "- " + r.name + " (" + r.linkAccess + ")").join("\n") + "\n"
+    : "",
   discoveryNotes.length
     ? "\n**Folder discovery had problems** (nothing was removed from the directory as a result):\n\n" +
       discoveryNotes.map(n => "- " + n).join("\n") + "\n"

@@ -53,6 +53,25 @@ WorkInSync-only directory. That repo is untouched and still live; nothing here a
 started as a copy of its index, so WorkInSync works in this repo from day one without
 re-indexing.
 
+## Previews
+
+Hovering a result shows one key screen in a floating panel, loaded straight from
+Figma with `embed.figma.com`. The embed respects each viewer's own Figma
+permissions, so no design is exposed to anyone who could not already open it, and
+no images are stored or published here. The Preview button turns it off, and that
+choice is remembered per browser.
+
+## What is published, and what is not
+
+The index ships as `figma-directory-data.bin`, a gzipped blob rather than readable
+JSON. With `robots.txt` and `noindex` tags that keeps the directory out of search
+results and out of casual view in this public repo. It is obfuscation, not access
+control: anyone who deliberately looks can still decompress it.
+
+Every run audits Figma share settings and flags any file set to "anyone with the
+link" in the run summary. Those are the only files a published file key actually
+exposes, since Figma enforces permissions on everything else.
+
 ## Safety behaviour
 
 - A file that fails to index keeps its previous data; everything else still publishes.

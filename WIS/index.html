@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<meta name="googlebot" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WorkInSync Figma Directory</title>
 <style>
@@ -42,6 +44,26 @@
     .file-row{grid-template-columns:minmax(0,1fr) auto}
     .file-row>:nth-child(2),.file-row>:nth-child(4){display:none}
   }
+
+  /* floating preview */
+  .pv{position:fixed;right:22px;bottom:22px;width:430px;background:#0b1114;border:1px solid rgba(139,92,246,0.32);
+      border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.6);z-index:50;
+      opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .16s,transform .16s}
+  .pv.on{opacity:1;transform:translateY(0);pointer-events:auto}
+  .pv-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+  .pv-t{font-size:12px;font-weight:600;color:#f5f3ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .pv-s{font-size:10.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .pv-x{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;font-family:inherit}
+  .pv-x:hover{color:var(--text)}
+  .pv-body{position:relative;height:300px;background:#0e1518}
+  .pv-body iframe{width:100%;height:100%;border:0;display:block}
+  .pv-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+          padding:22px;font-size:11.5px;color:var(--text-muted);line-height:1.6}
+  .pv-foot{padding:7px 12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-muted)}
+  .pv-toggle{padding:7px 11px;font-size:12px;border-radius:8px;border:1px solid var(--border);
+             background:rgba(255,255,255,.04);color:var(--text-dim);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .pv-toggle[aria-pressed="true"]{background:rgba(139,92,246,0.14);border-color:rgba(139,92,246,0.32);color:#ddd6fe}
+  @media(max-width:760px){.pv{display:none}}
 </style>
 </head>
 <body>
@@ -66,14 +88,29 @@ const STALE_COLORS = {fresh:"#10b981",recent:"#60a5fa",aging:"#f59e0b",stale:"#e
 
 let state = { files: [], search: "", moduleFilter: "All", projectFilter: "All", sortBy: "lastModified", sortDir: "desc" };
 
+// The index ships as a gzipped blob rather than readable JSON: it keeps the file
+// out of search-engine results and out of casual view in the repo. Falls back to
+// plain JSON so an older data file still works.
+async function fetchIndex(base) {
+  const bust = "?v=" + Date.now();
+  let res = await fetch(base + "figma-directory-data.bin" + bust);
+  if (res.ok) {
+    const buf = await res.arrayBuffer();
+    if (typeof DecompressionStream !== "function")
+      throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(stream).text());
+  }
+  res = await fetch(base + "figma-directory-data.json" + bust);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
 async function loadData() {
   // Relative path: works on GitHub Pages, Netlify, or a local folder.
   // Cache-buster stops the CDN serving yesterday's index.
-  const url = "figma-directory-data.json?v=" + Date.now();
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    state.files = await res.json();
+    state.files = await fetchIndex("");
     const labels = state.files.reduce((n,f) => n + ((f.labels||[]).length), 0);
     console.log("Loaded " + state.files.length + " files, " + labels + " labels");
   } catch (e) {
@@ -82,11 +119,102 @@ async function loadData() {
       '<div class="empty"><div class="empty-icon">\u26a0\ufe0f</div>' +
       '<div style="font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:6px">Could not load the index</div>' +
       '<div style="font-size:13px;color:var(--text-muted);max-width:420px;margin:0 auto">' + e.message +
-      '<br><br>figma-directory-data.json must sit next to this page.</div></div>';
+      '<br><br>figma-directory-data.bin must sit next to this page.</div></div>';
     return;
   }
   render();
 }
+
+
+let pvRows = [];
+
+/* ---------- floating preview ---------- */
+// One reused panel showing a single Figma frame. The embed respects each viewer's
+// own Figma permissions, so nothing here exposes a design to someone without access.
+const PV_HOST = "mis-figma-directory";
+let pvTimer = null, pvCur = -1, pvHideTimer = null;
+
+function pvOn() {
+  try { return localStorage.getItem("figdir.preview") !== "off"; } catch { return true; }
+}
+function pvSet(v) {
+  try { localStorage.setItem("figdir.preview", v ? "on" : "off"); } catch {}
+}
+
+function pvEl() {
+  let el = document.getElementById("pv");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "pv";
+  el.className = "pv";
+  el.innerHTML =
+    '<div class="pv-head"><div style="min-width:0;flex:1">' +
+      '<div class="pv-t" id="pvT"></div><div class="pv-s" id="pvS"></div>' +
+    '</div><button class="pv-x" id="pvX" title="Hide preview">×</button></div>' +
+    '<div class="pv-body" id="pvB"></div>' +
+    '<div class="pv-foot">Live from Figma · sign in to Figma if it stays blank</div>';
+  document.body.appendChild(el);
+  el.addEventListener("mouseenter", () => clearTimeout(pvHideTimer));
+  el.addEventListener("mouseleave", pvHide);
+  el.querySelector("#pvX").addEventListener("click", () => { pvSet(false); pvHide(); });
+  return el;
+}
+
+function pvHide() {
+  clearTimeout(pvTimer);
+  pvHideTimer = setTimeout(() => {
+    const el = document.getElementById("pv");
+    if (el) { el.classList.remove("on"); el.querySelector("#pvB").innerHTML = ""; }
+    pvCur = -1;
+  }, 180);
+}
+
+function pvShow(i) {
+  if (!pvOn()) return;
+  const f = pvRows[i];
+  if (!f) return;
+  const first = (f.labels || [])[0];
+  const s = { t: f.name, fileName: f.projectName || "", page: first ? first.t : "",
+              fileId: f.id, nodeId: first ? first.id : "" };
+  clearTimeout(pvHideTimer);
+  if (pvCur === i) return;
+  pvCur = i;
+
+  const el = pvEl();
+  el.querySelector("#pvT").textContent = s.t;
+  el.querySelector("#pvS").textContent = s.fileName + (s.page ? " · " + s.page : "");
+  const body = el.querySelector("#pvB");
+  body.innerHTML = '<div class="pv-msg">Loading the frame from Figma…</div>';
+  el.classList.add("on");
+
+  if (!s.nodeId) { body.innerHTML = '<div class="pv-msg">No frame id on this screen — re-index the file.</div>'; return; }
+
+  // A fresh iframe each time: swapping src on one pollutes browser history.
+  const ifr = document.createElement("iframe");
+  ifr.loading = "lazy";
+  ifr.allowFullscreen = true;
+  ifr.referrerPolicy = "no-referrer-when-downgrade";
+  ifr.src = "https://embed.figma.com/design/" + s.fileId +
+          "?node-id=" + String(s.nodeId).replace(/:/g, "-") +
+          "&embed-host=" + PV_HOST + "&theme=dark&footer=false&page-selector=false";
+  ifr.addEventListener("load", () => { const m = body.querySelector(".pv-msg"); if (m) m.remove(); });
+  body.appendChild(ifr);
+}
+
+function pvQueue(i) {
+  if (!pvOn()) return;
+  clearTimeout(pvTimer);
+  pvTimer = setTimeout(() => pvShow(i), 420);   // don't fire while skimming
+}
+
+document.addEventListener("mouseover", e => {
+  const row = e.target.closest(".file-row");
+  if (row && row.dataset.i !== undefined) pvQueue(Number(row.dataset.i));
+});
+document.addEventListener("mouseout", e => {
+  const row = e.target.closest(".file-row");
+  if (row && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".file-row, .pv"))) pvHide();
+});
 
 function timeAgo(d) {
   if (!d) return "Unknown";
@@ -192,6 +320,7 @@ function renderList() {
 
   const q = state.search.toLowerCase();
   let h = '';
+  pvRows = [];
   for (const f of filtered) {
     const s = staleness(f.lastModified);
     const esc = t => (t||"").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -222,7 +351,8 @@ function renderList() {
       }
     }
 
-    h += '<div class="file-row">';
+    h += '<div class="file-row" data-i="' + pvRows.length + '">';
+    pvRows.push(f);
     h += '<div style="min-width:0"><a href="'+esc(cleanLink)+'" target="_blank" rel="noopener" class="file-name">'+esc(f.name)+'</a><div class="file-project">'+esc(f.projectName)+'</div>'+matchInfo+'</div>';
     h += '<div style="padding-top:2px"><span class="tag">'+(f.module||"Other")+'</span></div>';
     h += '<div class="time">'+timeAgo(f.lastModified)+'</div>';

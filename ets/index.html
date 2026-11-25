@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<meta name="googlebot" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ETS Figma Directory</title>
 <style>
@@ -73,6 +75,26 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:#0f2b28;border:1px solid var(--accent-border);color:var(--tag-text);font-size:12px;padding:9px 16px;border-radius:8px;transition:transform .22s ease;pointer-events:none}
   .toast.show{transform:translateX(-50%) translateY(0)}
 
+
+  /* floating preview */
+  .pv{position:fixed;right:22px;bottom:22px;width:430px;background:#0b1114;border:1px solid var(--accent-border);
+      border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.6);z-index:50;
+      opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .16s,transform .16s}
+  .pv.on{opacity:1;transform:translateY(0);pointer-events:auto}
+  .pv-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+  .pv-t{font-size:12px;font-weight:600;color:#f0fdfa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .pv-s{font-size:10.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .pv-x{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;font-family:inherit}
+  .pv-x:hover{color:var(--text)}
+  .pv-body{position:relative;height:300px;background:#0e1518}
+  .pv-body iframe{width:100%;height:100%;border:0;display:block}
+  .pv-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+          padding:22px;font-size:11.5px;color:var(--text-muted);line-height:1.6}
+  .pv-foot{padding:7px 12px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-muted)}
+  .pv-toggle{padding:7px 11px;font-size:12px;border-radius:8px;border:1px solid var(--border);
+             background:rgba(255,255,255,.04);color:var(--text-dim);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .pv-toggle[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent-border);color:var(--tag-text)}
+  @media(max-width:760px){.pv{display:none}}
   @media(max-width:760px){
     .screen{grid-template-columns:minmax(0,1fr) auto}
     .screen>.mod-cell{display:none}
@@ -120,16 +142,32 @@ const state = {
 };
 
 /* ---------- load ---------- */
+// The index ships as a gzipped blob rather than readable JSON: it keeps the file
+// out of search-engine results and out of casual view in the repo. Falls back to
+// plain JSON so an older data file still works.
+async function fetchIndex(base) {
+  const bust = "?v=" + Date.now();
+  let res = await fetch(base + "figma-directory-data.bin" + bust);
+  if (res.ok) {
+    const buf = await res.arrayBuffer();
+    if (typeof DecompressionStream !== "function")
+      throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(stream).text());
+  }
+  res = await fetch(base + "figma-directory-data.json" + bust);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
 
 async function load() {
   try {
-    const res = await fetch("figma-directory-data.json?v=" + Date.now());
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    state.files = await res.json();
+    state.files = await fetchIndex("");
   } catch (e) {
     return showEmpty(
       "Could not load the index",
-      "<code>figma-directory-data.json</code> must sit next to this page. " +
+      "<code>figma-directory-data.bin</code> must sit next to this page. " +
       "If the ETS directory hasn't been indexed yet, run the <b>Refresh Figma index</b> " +
       "workflow in the repo's Actions tab.<br><br><span style='opacity:.6'>" + esc(e.message) + "</span>"
     );
@@ -288,6 +326,8 @@ function render() {
        '<button class="mode" role="tab" data-mode="screens" aria-selected="' + (state.mode==="screens") + '">Screens</button>' +
        '<button class="mode" role="tab" data-mode="files" aria-selected="' + (state.mode==="files") + '">Files</button></div>';
 
+  h += '<button class="pv-toggle" id="pvToggle" aria-pressed="' + pvOn() + '" ' +
+       'title="Show a live Figma preview of the hovered screen">Preview</button>';
   h += '<select id="moduleSel"><option value="All">All modules</option>';
   for (const m of modules) h += '<option value="'+esc(m)+'"'+(state.module===m?' selected':'')+'>'+esc(m)+'</option>';
   h += '</select>';
@@ -314,8 +354,15 @@ function render() {
   document.getElementById("projectSel").addEventListener("change", e => { state.project = e.target.value; renderList(); });
   const ss = document.getElementById("sortSel");
   if (ss) ss.addEventListener("change", e => { state.sort = e.target.value; renderList(); });
+  const pvt = document.getElementById("pvToggle");
+  if (pvt) pvt.addEventListener("click", () => {
+    const next = !pvOn();
+    pvSet(next);
+    pvt.setAttribute("aria-pressed", String(next));
+    if (!next) pvHide();
+  });
   for (const b of document.querySelectorAll(".mode"))
-    b.addEventListener("click", () => { state.mode = b.dataset.mode; state.cursor = -1; render(); });
+    b.addEventListener("click", () => { state.mode = b.dataset.mode; state.cursor = -1; pvHide(); render(); });
 
   renderList();
   q.focus();
@@ -331,7 +378,7 @@ function renderList() {
     state.shown = rows.slice(0, MAX_ROWS);
     stats.innerHTML = '<span>' + rows.length.toLocaleString() + ' screen' + (rows.length===1?'':'s') +
       (rows.length > MAX_ROWS ? ' · showing first ' + MAX_ROWS : '') + '</span>' +
-      '<span style="color:var(--text-muted)">↑↓ to move · Enter opens in Figma · ⇧Enter opens Dev Mode</span>';
+      '<span style="color:var(--text-muted)">↑↓ to move · Enter opens in Figma · ⇧Enter opens Dev Mode \u00b7 hover to preview</span>';
 
     if (!rows.length) { list.innerHTML = '<div class="none">No screens match. Try fewer words, or switch to Files.</div>'; return; }
 
@@ -379,6 +426,82 @@ function renderList() {
   }
 }
 
+/* ---------- floating preview ---------- */
+// One reused panel showing a single Figma frame. The embed respects each viewer's
+// own Figma permissions, so nothing here exposes a design to someone without access.
+const PV_HOST = "mis-figma-directory";
+let pvTimer = null, pvCur = -1, pvHideTimer = null;
+
+function pvOn() {
+  try { return localStorage.getItem("figdir.preview") !== "off"; } catch { return true; }
+}
+function pvSet(v) {
+  try { localStorage.setItem("figdir.preview", v ? "on" : "off"); } catch {}
+}
+
+function pvEl() {
+  let el = document.getElementById("pv");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "pv";
+  el.className = "pv";
+  el.innerHTML =
+    '<div class="pv-head"><div style="min-width:0;flex:1">' +
+      '<div class="pv-t" id="pvT"></div><div class="pv-s" id="pvS"></div>' +
+    '</div><button class="pv-x" id="pvX" title="Hide preview">×</button></div>' +
+    '<div class="pv-body" id="pvB"></div>' +
+    '<div class="pv-foot">Live from Figma · sign in to Figma if it stays blank</div>';
+  document.body.appendChild(el);
+  el.addEventListener("mouseenter", () => clearTimeout(pvHideTimer));
+  el.addEventListener("mouseleave", pvHide);
+  el.querySelector("#pvX").addEventListener("click", () => { pvSet(false); pvHide(); renderList(); });
+  return el;
+}
+
+function pvHide() {
+  clearTimeout(pvTimer);
+  pvHideTimer = setTimeout(() => {
+    const el = document.getElementById("pv");
+    if (el) { el.classList.remove("on"); el.querySelector("#pvB").innerHTML = ""; }
+    pvCur = -1;
+  }, 180);
+}
+
+function pvShow(i) {
+  if (!pvOn()) return;
+  const s = state.shown[i];
+  if (!s || state.mode !== "screens") return;
+  clearTimeout(pvHideTimer);
+  if (pvCur === i) return;
+  pvCur = i;
+
+  const el = pvEl();
+  el.querySelector("#pvT").textContent = s.t;
+  el.querySelector("#pvS").textContent = s.fileName + (s.page ? " · " + s.page : "");
+  const body = el.querySelector("#pvB");
+  body.innerHTML = '<div class="pv-msg">Loading the frame from Figma…</div>';
+  el.classList.add("on");
+
+  if (!s.nodeId) { body.innerHTML = '<div class="pv-msg">No frame id on this screen — re-index the file.</div>'; return; }
+
+  // A fresh iframe each time: swapping src on one pollutes browser history.
+  const f = document.createElement("iframe");
+  f.loading = "lazy";
+  f.allowFullscreen = true;
+  f.referrerPolicy = "no-referrer-when-downgrade";
+  f.src = "https://embed.figma.com/design/" + s.fileId +
+          "?node-id=" + String(s.nodeId).replace(/:/g, "-") +
+          "&embed-host=" + PV_HOST + "&theme=dark&footer=false&page-selector=false";
+  f.addEventListener("load", () => { const m = body.querySelector(".pv-msg"); if (m) m.remove(); });
+  body.appendChild(f);
+}
+
+function pvQueue(i) {
+  if (!pvOn()) return;
+  clearTimeout(pvTimer);
+  pvTimer = setTimeout(() => pvShow(i), 420);   // don't fire while skimming
+}
+
 /* ---------- interaction ---------- */
 
 function openScreen(i, dev) {
@@ -395,6 +518,15 @@ async function copyScreen(i) {
   try { await navigator.clipboard.writeText(url); toast("Link copied"); }
   catch { window.prompt("Copy this link:", url); }
 }
+
+document.addEventListener("mouseover", e => {
+  const row = e.target.closest(".screen");
+  if (row) pvQueue(Number(row.dataset.i));
+});
+document.addEventListener("mouseout", e => {
+  const row = e.target.closest(".screen");
+  if (row && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".screen, .pv"))) pvHide();
+});
 
 document.addEventListener("click", e => {
   const btn = e.target.closest("[data-act]");
@@ -426,6 +558,7 @@ document.addEventListener("keydown", e => {
       : Math.max(0, state.cursor - 1);
     renderList();
     document.querySelector('.screen[data-i="' + state.cursor + '"]')?.scrollIntoView({block:"nearest"});
+    pvQueue(state.cursor);
   } else if (e.key === "Enter" && state.cursor >= 0) {
     e.preventDefault();
     openScreen(state.cursor, e.shiftKey);
