@@ -93,5 +93,8 @@
     "archive",
     "deprecated"
   ],
-  "indexWords": true
+  "indexWords": true,
+  "skip": [
+    "Prototype MIS 2.0"
+  ]
 }

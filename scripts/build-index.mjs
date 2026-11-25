@@ -38,6 +38,9 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+const skips = (Array.isArray(config.skip) ? config.skip : [])
+  .map(x => String(x || "").toLowerCase().trim()).filter(Boolean);
+
 const settings = {
   labels:     (config.labels && config.labels.length ? config.labels : DEFAULT_LABELS).map(norm),
   excludes:   (Array.isArray(config.excludes) ? config.excludes : DEFAULT_EXCLUDES).map(norm),
@@ -176,7 +179,19 @@ async function harvest(fileKey, ids, page, acc) {
 
 async function indexOne(entry) {
   const fileKey = entry.id;
-  const meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=2");
+
+  // Normally one call gets the pages and their top-level children. A very large
+  // file blows Figma's response limit even at depth 2, so fall back to the page
+  // list alone and fetch each page's children separately.
+  let meta, shallow = false;
+  try {
+    meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=2");
+  } catch (e) {
+    if (!e || e.kind !== "split") throw e;
+    console.log("    file too large at depth 2 - fetching page by page");
+    meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=1");
+    shallow = true;
+  }
   const pages = (meta.document && meta.document.children) || [];
 
   const acc = { labels: [], topNames: [], skipped: 0, excluded: 0, words: settings.indexWords ? new Set() : null };
@@ -188,8 +203,21 @@ async function indexOne(entry) {
     pagesData.push({ name: page.name, id: page.id });
     collectWords(page.name, acc);
 
+    let pageKids = page.children;
+    if (shallow && !pageKids) {
+      try {
+        const pn = await nodesFetch(fileKey, [page.id], 2);
+        const pd = pn[page.id] && pn[page.id].document;
+        pageKids = (pd && pd.children) || [];
+      } catch (e) {
+        if (isStop(e)) throw e;
+        acc.skipped++;
+        pageKids = [];
+      }
+    }
+
     const kids = [];
-    for (const c of page.children || []) {
+    for (const c of pageKids || []) {
       if (isExcludedName(c.name)) { acc.excluded++; continue; }
       if (STRUCTURAL[c.type] || c.type === "INSTANCE") kids.push(c.id);
       if (STRUCTURAL[c.type]) { const nm = (c.name || "").trim(); if (nm) acc.topNames.push(nm); }
@@ -411,6 +439,7 @@ if (Array.isArray(config.folders) && config.folders.length) {
 const cleanDiscovery = discoveryNotes.length === 0;
 
 const entries = [];
+const skipped = [];
 const byId = new Map();
 // Explicit "files" entries come last so they can re-tag a file a folder brought in.
 for (const f of [...discovered, ...(Array.isArray(config.files) ? config.files : [])]) {
@@ -422,6 +451,12 @@ for (const f of [...discovered, ...(Array.isArray(config.files) ? config.files :
     continue;
   }
   const e = { ...f, id };
+  const hay = [id, e.name || ""].map(x => String(x).toLowerCase());
+  if (skips.some(sk => hay.some(h => h === sk || (sk.length > 3 && h.includes(sk))))) {
+    console.log("Skipping (listed in \"skip\"): " + (e.name || id));
+    skipped.push(e.name || id);
+    continue;
+  }
   byId.set(id, e);
   entries.push(e);
 }
@@ -538,6 +573,7 @@ const summary = [
     (removed ? ", " + removed + " removed (no longer in config)" : "") +
     (failed ? ", **" + failed + " failed**" : ""),
   stoppedBy ? "\n**Run stopped early:** " + stoppedBy + "\n" : "",
+  skipped.length ? "\nSkipped by config: " + skipped.join(", ") + "\n" : "",
   discoveryNotes.length
     ? "\n**Folder discovery had problems** (nothing was removed from the directory as a result):\n\n" +
       discoveryNotes.map(n => "- " + n).join("\n") + "\n"
