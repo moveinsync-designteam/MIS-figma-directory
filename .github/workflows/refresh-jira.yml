@@ -1,0 +1,68 @@
+name: Refresh Jira cross-reference
+
+# Asks Jira which work items mention each Figma file already in the ETS index,
+# and writes ets/jira-index.bin next to it.
+#
+# Secrets this needs:
+#   JIRA_EMAIL  - the Atlassian account the token belongs to
+#   JIRA_TOKEN  - an Atlassian API token (id.atlassian.com -> Security -> API tokens)
+#   SITE_KEY    - the same key the Figma index is sealed with
+
+on:
+  # Friday night, after the Figma index has refreshed.
+  # 22:30 UTC Friday = 04:00 IST Saturday.
+  schedule:
+    - cron: "30 22 * * 5"
+  push:
+    paths:
+      - "scripts/build-jira.mjs"
+      - "scripts/seal.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+# Same group as the Figma refresh, so if that one is still running this waits
+# instead of racing it to a push.
+concurrency:
+  group: figma-index
+  cancel-in-progress: false
+
+jobs:
+  jira:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Cross-reference Jira
+        env:
+          JIRA_SITE:  moveinsync.atlassian.net
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          SITE_KEY:   ${{ secrets.SITE_KEY }}
+          DATA_PATH:  ets/figma-directory-data.bin
+          JIRA_PATH:  ets/jira-index.bin
+        run: node scripts/build-jira.mjs
+
+      - name: Publish to the site
+        run: |
+          git config user.name  "figma-directory-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- ets/jira-index.bin
+          if git diff --cached --quiet; then
+            echo "Nothing changed - site left as is."
+            exit 0
+          fi
+          git commit -m "Refresh Jira cross-reference"
+          git pull --rebase
+          git push
+
+      - name: Rebuild GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" >/dev/null || echo "Pages will pick up the commit on its own."

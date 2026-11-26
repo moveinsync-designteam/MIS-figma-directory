@@ -5,15 +5,16 @@ name: Refresh Figma index
 #   /ets         ETS         (indexed on the schedule)
 
 on:
-  # Every night at 02:00 IST (20:30 UTC) - ETS only.
+  # Friday night: 20:30 UTC Friday = 02:00 IST Saturday. ETS only.
   schedule:
-    - cron: "30 20 * * *"
+    - cron: "30 20 * * 5"
   # Editing a config re-indexes just that directory.
   push:
     paths:
       - "ets/figma-directory-config.json"
       - "WIS/figma-directory-config.json"
       - "scripts/build-index.mjs"
+      - "scripts/seal.mjs"
   # "Run workflow" button in the Actions tab.
   workflow_dispatch:
     inputs:
@@ -50,7 +51,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -86,6 +87,7 @@ jobs:
         if: contains(fromJSON('["ets","both"]'), steps.plan.outputs.target)
         env:
           FIGMA_TOKEN:  ${{ secrets.FIGMA_TOKEN }}
+          SITE_KEY:     ${{ secrets.SITE_KEY }}
           CONFIG_PATH:  ets/figma-directory-config.json
           DATA_PATH:    ets/figma-directory-data.json
           STATE_PATH:   ets/.figdir-state.json
@@ -100,6 +102,7 @@ jobs:
         if: contains(fromJSON('["workinsync","both"]'), steps.plan.outputs.target)
         env:
           FIGMA_TOKEN:  ${{ secrets.FIGMA_TOKEN }}
+          SITE_KEY:     ${{ secrets.SITE_KEY }}
           CONFIG_PATH:  WIS/figma-directory-config.json
           DATA_PATH:    WIS/figma-directory-data.json
           STATE_PATH:   WIS/.figdir-state.json
