@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
-import { seal, readKey } from "./seal.mjs";
+import { seal, unseal, readKey } from "./seal.mjs";
 
 const CONFIG_PATH = process.env.CONFIG_PATH || "figma-directory-config.json";
 const DATA_PATH   = process.env.DATA_PATH   || "figma-directory-data.json";
@@ -55,6 +55,14 @@ const DEFAULT_EXCLUDE_FILES = ["deprecated", "depreceated", "dump", "experiment"
 const excludeFiles = (Array.isArray(config.excludeFiles) ? config.excludeFiles : DEFAULT_EXCLUDE_FILES)
   .map(x => String(x || "").toLowerCase().trim()).filter(Boolean);
 
+// excludeFiles matches on part of a name, which is handy for junk ("dump",
+// "deprecated") but blunt. excludeFileIds drops an exact Figma file key, for a
+// file that belongs to another product but happens to sit in one of these
+// folders. No false positives, and a renamed file stays excluded.
+const excludeFileIds = new Set(
+  (Array.isArray(config.excludeFileIds) ? config.excludeFileIds : [])
+    .map(x => String(x || "").trim()).filter(Boolean));
+
 const settings = {
   labels:     (config.labels && config.labels.length ? config.labels : DEFAULT_LABELS).map(norm),
   excludes:   (Array.isArray(config.excludes) ? config.excludes : DEFAULT_EXCLUDES).map(norm),
@@ -63,8 +71,16 @@ const settings = {
 const settingsHash = crypto.createHash("sha1").update(JSON.stringify(settings)).digest("hex").slice(0, 12);
 
 function readData() {
-  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(BIN_PATH)).toString("utf8")); }
-  catch { return readJson(DATA_PATH, []); }   // falls back to a pre-blob data file
+  // unseal() handles both shapes: a sealed blob (needs SITE_KEY) and plain gzip.
+  // Getting this wrong is expensive rather than loud - the previous index would
+  // read as empty and every run would become a full re-index.
+  try { return unseal(fs.readFileSync(BIN_PATH), SITE_KEY); }
+  catch (e) {
+    if (fs.existsSync(BIN_PATH))
+      console.warn("Could not read the previous index (" + ((e && e.message) || e) +
+                   ") - this run will re-index everything.");
+    return readJson(DATA_PATH, []);           // falls back to a pre-blob data file
+  }
 }
 
 const prevData  = readData();
@@ -502,6 +518,10 @@ for (const f of [...discovered, ...(Array.isArray(config.files) ? config.files :
     continue;
   }
   const nm = String(e.name || "").toLowerCase();
+  if (excludeFileIds.has(id)) {
+    excludedFiles.push(e.name + " (excluded by id)");
+    continue;
+  }
   const junk = nm && excludeFiles.find(x => nm.includes(x));
   if (junk) {
     excludedFiles.push(e.name + " (" + junk + ")");

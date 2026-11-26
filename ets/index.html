@@ -28,6 +28,14 @@
   .lnk{font-size:11px;color:var(--text-dim);text-decoration:none;border:1px solid var(--border);
        padding:5px 10px;border-radius:6px}
   .lnk:hover{color:var(--text);border-color:var(--accent-border)}
+  /* .lnk was written for <a>; a <button> needs these or it falls back to the
+     browser's own grey face and system font */
+  button.lnk{font-family:inherit;cursor:pointer;line-height:1.55;
+             -webkit-appearance:none;appearance:none}
+  /* The access link is the one control people must be able to find. It gets the
+     accent, not the muted treatment the navigation links use. */
+  #cpl{color:#5eead4;background:rgba(45,212,191,0.15);border-color:rgba(45,212,191,0.5);font-weight:500}
+  #cpl:hover{color:#0a0a0a;background:var(--accent);border-color:var(--accent)}
 
   .shell{display:flex;align-items:flex-start}
   .col{flex:1;min-width:0}

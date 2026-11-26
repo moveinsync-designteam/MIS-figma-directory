@@ -109,5 +109,10 @@
     "backup",
     "trash",
     "scrap"
+  ],
+  "excludeFileIds": [
+    "wW9tiB9HEQjvzpoS1eX9lg",
+    "bPMdTmkYh6UrVNc7nM9Q7O",
+    "nxvQv2W2fho62VF9qnQVRY"
   ]
 }
