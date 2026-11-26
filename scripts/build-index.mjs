@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
+import { seal, readKey } from "./seal.mjs";
 
 const CONFIG_PATH = process.env.CONFIG_PATH || "figma-directory-config.json";
 const DATA_PATH   = process.env.DATA_PATH   || "figma-directory-data.json";
@@ -22,6 +23,8 @@ const ONLY        = (process.env.ONLY || "").trim().toLowerCase();
 const ONLY_MODULE = (process.env.ONLY_MODULE || "").trim().toLowerCase();
 const COUNT_ONLY  = String(process.env.COUNT_ONLY || "").toLowerCase() === "true";
 const API         = (process.env.FIGMA_API_BASE || "https://api.figma.com").replace(/\/+$/, "");
+// Set SITE_KEY and the published blob is encrypted. Unset, it is plain gzip.
+const SITE_KEY    = readKey(process.env.SITE_KEY);
 
 const DEFAULT_LABELS   = ["for internal use", "section-titles", "section-titles-lg", "sub section header", "page-titles"];
 const DEFAULT_EXCLUDES = ["graveyard", "experiments", "earlier versions", "inspiration", "sandbox", "archive", "deprecated"];
@@ -206,14 +209,30 @@ async function indexOne(entry) {
   // Normally one call gets the pages and their top-level children. A very large
   // file blows Figma's response limit even at depth 2, so fall back to the page
   // list alone and fetch each page's children separately.
+  // A few files are large enough that Figma refuses even the structure call. Step
+  // down: full depth, then the page list, then the document root on its own.
   let meta, shallow = false;
-  try {
-    meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=2");
-  } catch (e) {
-    if (!e || e.kind !== "split") throw e;
-    console.log("    file too large at depth 2 - fetching page by page");
-    meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=1");
-    shallow = true;
+  for (const step of ["depth2", "depth1", "root"]) {
+    try {
+      if (step === "depth2") {
+        meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=2");
+      } else if (step === "depth1") {
+        console.log("    too large at depth 2 - retrying with the page list only");
+        meta = await figmaGet(API + "/v1/files/" + fileKey + "?depth=1");
+        shallow = true;
+      } else {
+        console.log("    too large at depth 1 - reading the document root on its own");
+        const r = await nodesFetch(fileKey, ["0:0"], 1);
+        const doc = r["0:0"] && r["0:0"].document;
+        if (!doc) throw ApiError("too large for the Figma API to return", "toolarge");
+        meta = { name: entry.name || "", lastModified: "", document: doc };
+        shallow = true;
+      }
+      break;
+    } catch (e) {
+      if (!e || e.kind !== "split") throw e;
+      if (step === "root") throw ApiError("too large for the Figma API to return", "toolarge");
+    }
   }
   const pages = (meta.document && meta.document.children) || [];
 
@@ -519,9 +538,11 @@ function assemble(partial) {
 }
 
 function writeOutputs(records) {
-  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(records)), { level: 9 });
+  const { buf: gz, sealed } = seal(records, SITE_KEY);
   fs.writeFileSync(BIN_PATH + ".tmp", gz);
   fs.renameSync(BIN_PATH + ".tmp", BIN_PATH);
+  console.log(sealed ? "  index sealed with SITE_KEY"
+                     : "  index written unsealed (no SITE_KEY set)");
   // never leave a readable copy behind in the repo
   try { if (fs.existsSync(DATA_PATH)) fs.unlinkSync(DATA_PATH); } catch {}
   fs.writeFileSync(STATE_PATH, JSON.stringify({
@@ -533,6 +554,7 @@ function writeOutputs(records) {
 const results = new Map();     // id -> record, in config order at the end
 const report = [];             // rows for the run summary
 let failed = 0, stoppedBy = null, tokenErrorsInARow = 0;
+const tooLarge = [];
 
 console.log("Figma Directory refresh - " + entries.length + " files" +
   (FULL ? " (full re-index)" : "") + (settingsChanged ? " (label/skip settings changed - full re-index)" : "") +
@@ -583,8 +605,23 @@ for (let i = 0; i < entries.length; i++) {
     // Save as we go, so a timeout or crash still keeps the work done so far.
     writeOutputs(assemble(true));
   } catch (e) {
-    failed++;
     const msg = (e && e.message) || String(e);
+    // A file Figma simply will not serve is not a broken run: keep it listed by
+    // name, note it, and let everything else finish green.
+    if (e && e.kind === "toolarge") {
+      tooLarge.push(prev ? prev.name : (entry.name || entry.id));
+      console.warn(tag + " - too large for the Figma API; kept by name only");
+      results.set(entry.id, prev || {
+        id: entry.id, name: entry.name || entry.id,
+        projectName: entry.projectName || "Untagged", module: entry.module || "Other",
+        lastModified: "", link: entry.link || ("https://www.figma.com/design/" + entry.id),
+        pages: [], pagesData: [], labels: [], words: [],
+        searchText: String(entry.name || "").toLowerCase()
+      });
+      report.push([tag, "too large for the Figma API - listed by name only"]);
+      continue;
+    }
+    failed++;
     console.warn(tag + " - FAILED: " + msg);
     report.push([tag, "FAILED: " + msg + (prev ? " - kept previous data" : "")]);
     if (prev) results.set(entry.id, prev);
@@ -613,6 +650,10 @@ const summary = [
     (failed ? ", **" + failed + " failed**" : ""),
   stoppedBy ? "\n**Run stopped early:** " + stoppedBy + "\n" : "",
   skipped.length ? "\nSkipped by config: " + skipped.join(", ") + "\n" : "",
+  tooLarge.length
+    ? "\n" + tooLarge.length + " file(s) are too large for the Figma API to return and are listed by " +
+      "name only: " + tooLarge.join(", ") + "\n"
+    : "",
   excludedFiles.length
     ? "\n" + excludedFiles.length + " file(s) left out as dumps/deprecated/experiments: " +
       excludedFiles.slice(0, 12).join(", ") + (excludedFiles.length > 12 ? ", \u2026" : "") + "\n"

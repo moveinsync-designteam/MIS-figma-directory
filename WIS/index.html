@@ -30,6 +30,11 @@
   .file-row:hover{background:var(--surface-hover)}
   .file-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#f4f4f5;cursor:pointer;text-decoration:none}
   .file-name:hover{color:var(--accent)}
+  .ic{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;
+      border:1px solid transparent;background:none;color:rgba(255,255,255,0.3);cursor:pointer;padding:0;
+      font-family:inherit;text-decoration:none;vertical-align:middle;margin-left:4px}
+  .ic:hover{color:var(--accent);border-color:rgba(139,92,246,0.32);background:rgba(139,92,246,0.14)}
+  .ic svg{display:block}
   .file-project{font-size:11px;color:var(--text-muted);margin-top:2px}
   .tag{display:inline-block;padding:3px 8px;background:var(--tag-bg);border:1px solid var(--accent-border);border-radius:5px;font-size:11px;color:var(--tag-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   .time{font-size:12px;color:rgba(255,255,255,0.4)}
@@ -77,6 +82,7 @@
   <div class="header-right" style="display:flex;align-items:center;gap:10px">
     <span class="meta" id="metaInfo"></span>
     <a href="../ets/" style="font-size:11px;color:var(--text-dim);text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px">ETS &rarr;</a>
+    <button id="cpl" type="button" style="font-size:11px;color:var(--text-dim);background:none;cursor:pointer;border:1px solid var(--border);padding:5px 10px;border-radius:6px;font-family:inherit" title="Copy the link that includes the access key">Copy access link</button>
     <a href="../" style="font-size:11px;color:var(--text-dim);text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px">All directories</a>
   </div>
 </div>
@@ -88,19 +94,72 @@ const STALE_COLORS = {fresh:"#10b981",recent:"#60a5fa",aging:"#f59e0b",stale:"#e
 
 let state = { files: [], search: "", moduleFilter: "All", projectFilter: "All", sortBy: "lastModified", sortDir: "desc" };
 
+/* ---------- access key ---------- */
+
+// The published blobs are encrypted. The key travels in the "#k=" part of the
+// link, which browsers never send to a server, and is kept in this browser
+// afterwards so the plain address keeps working. Stripping it from the address
+// bar keeps it out of screenshots.
+const KEY_STORE = "figdir.key";
+
+function keyFromUrl() {
+  const m = /[#&]k=([A-Za-z0-9_\-+/=]+)/.exec(location.hash || "");
+  return m ? m[1] : null;
+}
+function storedKey() {
+  try { return localStorage.getItem(KEY_STORE); } catch (e) { return null; }
+}
+function accessKey() { return keyFromUrl() || storedKey(); }
+
+function keyBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+async function gunzipJSON(u8) {
+  if (typeof DecompressionStream !== "function")
+    throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
+  const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+// Plain gzip starts 1f 8b; a sealed blob starts with the ASCII marker FDE1.
+async function openBlob(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0x1f && u8[1] === 0x8b) return gunzipJSON(u8);
+  if (!(u8[0] === 70 && u8[1] === 68 && u8[2] === 69 && u8[3] === 49))
+    throw new Error("That file is not a directory index.");
+  const raw = accessKey();
+  if (!raw) throw Object.assign(new Error("no access key"), { code: "nokey" });
+  let plain;
+  try {
+    const key = await crypto.subtle.importKey("raw", keyBytes(raw), "AES-GCM", false, ["decrypt"]);
+    plain = new Uint8Array(await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: u8.slice(4, 16) }, key, u8.slice(16)));
+  } catch (e) {
+    throw Object.assign(new Error("wrong access key"), { code: "badkey" });
+  }
+  try { localStorage.setItem(KEY_STORE, raw); } catch (e) {}
+  if (keyFromUrl() && history.replaceState)
+    history.replaceState(null, "", location.pathname + location.search);
+  return gunzipJSON(plain);
+}
+
+function shareLink() {
+  const k = accessKey();
+  return location.origin + location.pathname + (k ? "#k=" + k : "");
+}
+
 // The index ships as a gzipped blob rather than readable JSON: it keeps the file
 // out of search-engine results and out of casual view in the repo. Falls back to
 // plain JSON so an older data file still works.
 async function fetchIndex(base) {
   const bust = "?v=" + Date.now();
   let res = await fetch(base + "figma-directory-data.bin" + bust);
-  if (res.ok) {
-    const buf = await res.arrayBuffer();
-    if (typeof DecompressionStream !== "function")
-      throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
-    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
-    return JSON.parse(await new Response(stream).text());
-  }
+  if (res.ok) return openBlob(await res.arrayBuffer());
   res = await fetch(base + "figma-directory-data.json" + bust);
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
@@ -115,6 +174,20 @@ async function loadData() {
     console.log("Loaded " + state.files.length + " files, " + labels + " labels");
   } catch (e) {
     console.error("Load error:", e);
+    if (e && e.code === "nokey" || e && e.code === "badkey") {
+      if (e.code === "badkey") { try { localStorage.removeItem(KEY_STORE); } catch (x) {} }
+      document.getElementById("mainContent").innerHTML =
+        '<div class="empty"><div class="empty-icon">\ud83d\udd12</div>' +
+        '<div style="font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:6px">' +
+        (e.code === "nokey" ? "Access link needed" : "That link no longer works") + '</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);max-width:430px;margin:0 auto;line-height:1.6">' +
+        (e.code === "nokey"
+          ? "Open this directory with the access link your team shares \u2014 the one ending in #k=\u2026 . " +
+            "Paste the whole thing, including everything after the #."
+          : "That access key does not open this directory. It may have been rotated \u2014 " +
+            "ask whoever shares the link for the current one.") + '</div></div>';
+      return;
+    }
     document.getElementById("mainContent").innerHTML =
       '<div class="empty"><div class="empty-icon">\u26a0\ufe0f</div>' +
       '<div style="font-size:15px;color:rgba(255,255,255,0.5);margin-bottom:6px">Could not load the index</div>' +
@@ -127,6 +200,14 @@ async function loadData() {
 
 
 let pvRows = [];
+
+const EYE = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M1.2 8S3.7 3.6 8 3.6 14.8 8 14.8 8 12.3 12.4 8 12.4 1.2 8 1.2 8z"/><circle cx="8" cy="8" r="1.9"/></svg>';
+const EXT = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M9.5 2.2H13.8V6.5"/><path d="M13.8 2.2 7.4 8.6"/>' +
+  '<path d="M11.6 9.4v3.5a1 1 0 0 1-1 1h-7.4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h3.5"/></svg>';
 
 /* ---------- floating preview ---------- */
 // One reused panel showing a single Figma frame. The embed respects each viewer's
@@ -207,6 +288,8 @@ function pvQueue(i) {
 }
 
 document.addEventListener("click", e => {
+  const pv = e.target.closest("[data-pv]");
+  if (pv) { e.preventDefault(); pvShow(Number(pv.dataset.i)); return; }
   if (e.target.closest(".pv") || e.target.closest("a") || e.target.closest("[onclick]")) return;
   const row = e.target.closest(".file-row");
   if (row && row.dataset.i !== undefined) pvShow(Number(row.dataset.i));
@@ -349,7 +432,11 @@ function renderList() {
 
     h += '<div class="file-row" data-i="' + pvRows.length + '">';
     pvRows.push(f);
-    h += '<div style="min-width:0"><a href="'+esc(cleanLink)+'" target="_blank" rel="noopener" class="file-name">'+esc(f.name)+'</a><div class="file-project">'+esc(f.projectName)+'</div>'+matchInfo+'</div>';
+    const ri = pvRows.length - 1;
+    h += '<div style="min-width:0"><a href="'+esc(cleanLink)+'" target="_blank" rel="noopener" class="file-name">'+esc(f.name)+'</a>'
+       + '<button class="ic" data-pv="1" data-i="'+ri+'" title="Preview in the panel" aria-label="Preview">'+EYE+'</button>'
+       + '<a class="ic" href="'+esc(cleanLink)+'" target="_blank" rel="noopener" title="Open the file in a new tab" aria-label="Open in new tab">'+EXT+'</a>'
+       + '<div class="file-project">'+esc(f.projectName)+'</div>'+matchInfo+'</div>';
     h += '<div style="padding-top:2px"><span class="tag">'+(f.module||"Other")+'</span></div>';
     h += '<div class="time">'+timeAgo(f.lastModified)+'</div>';
     h += '<div style="display:flex;justify-content:flex-end;padding-top:4px"><span class="staleness-dot" style="background:'+STALE_COLORS[s]+'"></span></div>';
@@ -357,6 +444,14 @@ function renderList() {
   }
   el.innerHTML = h;
 }
+
+const cpl = accessKey() ? document.getElementById("cpl") : null;
+if (!accessKey()) { const b = document.getElementById("cpl"); if (b) b.style.display = "none"; }
+if (cpl) cpl.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(shareLink()); } catch (e) {}
+  const was = cpl.textContent; cpl.textContent = "Copied";
+  setTimeout(() => { cpl.textContent = was; }, 1500);
+});
 
 loadData();
 </script>

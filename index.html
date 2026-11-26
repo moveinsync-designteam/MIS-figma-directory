@@ -78,7 +78,10 @@
 
   </div>
 
-  <div class="note">Nobody needs a Figma account to search. You only need one to open a file.</div>
+  <div class="note">Nobody needs a Figma account to search. You only need one to open a file.<br>
+    <span id="keynote" style="display:none">This link carries the access key. Share it the way you'd share a private document.
+    <button id="cpl" type="button" style="font:inherit;font-size:11px;color:inherit;background:none;cursor:pointer;
+      border:1px solid rgba(255,255,255,0.14);padding:4px 9px;border-radius:6px;margin-left:6px">Copy access link</button></span></div>
 
 </div>
 
@@ -110,6 +113,28 @@ async function status(url, elId) {
 
 status("WIS/.figdir-state.json", "wisFoot");
 status("ets/.figdir-state.json", "etsFoot");
+
+// The directories are encrypted; the key rides in "#k=". Catching it here means
+// the two cards below work on a plain click, and the fragment leaves the address
+// bar so it is not in every screenshot of this page.
+const KEY_STORE = "figdir.key";
+(function () {
+  const m = /[#&]k=([A-Za-z0-9_\-+/=]+)/.exec(location.hash || "");
+  if (m) {
+    try { localStorage.setItem(KEY_STORE, m[1]); } catch (e) {}
+    if (history.replaceState) history.replaceState(null, "", location.pathname + location.search);
+  }
+  let k = null;
+  try { k = localStorage.getItem(KEY_STORE); } catch (e) {}
+  if (!k) return;
+  document.getElementById("keynote").style.display = "inline";
+  document.getElementById("cpl").addEventListener("click", async function () {
+    const url = location.origin + location.pathname + "#k=" + k;
+    try { await navigator.clipboard.writeText(url); } catch (e) {}
+    const b = this, was = b.textContent;
+    b.textContent = "Copied"; setTimeout(function () { b.textContent = was; }, 1500);
+  });
+})();
 </script>
 </body>
 </html>

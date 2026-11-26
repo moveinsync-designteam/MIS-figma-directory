@@ -60,7 +60,7 @@
   .sdot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-top:5px}
 
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-  .chip{display:inline-flex;align-items:baseline;gap:6px;max-width:100%;padding:5px 10px;border-radius:6px;
+  .chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;max-width:100%;padding:5px 10px;border-radius:6px;
         background:rgba(255,255,255,0.045);border:1px solid var(--border);cursor:pointer;
         font-family:inherit;font-size:12px;color:var(--text);text-align:left;line-height:1.35}
   .chip:hover{border-color:var(--accent-border);background:var(--accent-soft)}
@@ -68,6 +68,24 @@
   .chip b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:460px}
   .chip mark{background:rgba(45,212,191,0.26);color:#ccfbf1;border-radius:2px;padding:0 1px}
   .chip i{font-style:normal;font-size:10.5px;color:var(--text-muted);white-space:nowrap}
+  .ic{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:0 0 22px;
+      border-radius:5px;border:1px solid transparent;background:none;color:var(--text-muted);
+      cursor:pointer;padding:0;font-family:inherit;text-decoration:none;vertical-align:middle}
+  .ic:hover{color:var(--accent);border-color:var(--accent-border);background:var(--accent-soft)}
+  .ic svg{display:block}
+  .fic{margin-left:4px}
+  .tixw{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+  .tixh{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px}
+  .tixc{display:flex;flex-wrap:wrap;gap:6px}
+  .tchip{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:4px 9px;border-radius:6px;
+         border:1px solid var(--border);background:rgba(96,165,250,0.06);font-size:11.5px;
+         color:var(--text-dim);text-decoration:none;line-height:1.5}
+  .tchip:hover{border-color:rgba(96,165,250,0.45);background:rgba(96,165,250,0.15);color:#dbeafe}
+  .tchip b{font-weight:600;color:#93c5fd;font-variant-numeric:tabular-nums;flex:0 0 auto}
+  .tchip u{text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:430px}
+  .tchip mark{background:rgba(96,165,250,0.3);color:#dbeafe;border-radius:2px;padding:0 1px}
+  .tdot{width:6px;height:6px;border-radius:50%;flex:0 0 6px}
+  .tcount{color:#93c5fd;cursor:pointer;border-bottom:1px dotted rgba(147,197,253,0.4)}
   .more{background:none;border:none;color:var(--text-dim);font-size:11px;cursor:pointer;
         font-family:inherit;padding:5px 4px;text-decoration:underline}
   .more:hover{color:var(--accent)}
@@ -129,6 +147,7 @@
   </div>
   <div class="hl">
     <span class="meta" id="metaInfo"></span>
+    <button class="lnk" id="cpl" type="button" title="Copy the link that includes the access key">Copy access link</button>
     <a class="lnk" href="../WIS/">WorkInSync &rarr;</a>
     <a class="lnk" href="../">All directories</a>
   </div>
@@ -159,8 +178,86 @@ const STALE = {fresh:"#10b981",recent:"#60a5fa",aging:"#f59e0b",stale:"#ef4444"}
 const EMBED_HOST = "mis-figma-directory";
 const CHIP_LIMIT = 12;
 
+const EYE = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M1.2 8S3.7 3.6 8 3.6 14.8 8 14.8 8 12.3 12.4 8 12.4 1.2 8 1.2 8z"/><circle cx="8" cy="8" r="1.9"/></svg>';
+const EXT = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M9.5 2.2H13.8V6.5"/><path d="M13.8 2.2 7.4 8.6"/>' +
+  '<path d="M11.6 9.4v3.5a1 1 0 0 1-1 1h-7.4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h3.5"/></svg>';
+
 const state = { files: [], q: "", module: "All", project: "All",
-                sort: "lastModified-desc", expanded: {}, sel: null, rows: [], showWeak: false };
+                sort: "lastModified-desc", expanded: {}, tixOpen: {}, sel: null,
+                rows: [], showWeak: false, jira: false, jiraCount: 0 };
+
+// Jira statuses collapse to four buckets for the dot on each ticket chip.
+const TSTAT = {
+  "done":"#10b981","done ":"#10b981","closed":"#10b981","ready for release":"#10b981",
+  "dev complete":"#34d399","waiting for qa":"#f59e0b","in qa review":"#f59e0b",
+  "in development":"#f59e0b","in progress":"#f59e0b",
+  "open":"#64748b","to do":"#64748b","ready for development":"#64748b",
+  "rejected":"#ef4444","cancelled":"#ef4444"
+};
+const tcol = s => TSTAT[String(s||"").trim().toLowerCase()] || "#64748b";
+
+/* ---------- access key ---------- */
+
+// The published blobs are encrypted. The key travels in the "#k=" part of the
+// link, which browsers never send to a server, and is kept in this browser
+// afterwards so the plain address keeps working. Stripping it from the address
+// bar keeps it out of screenshots.
+const KEY_STORE = "figdir.key";
+
+function keyFromUrl() {
+  const m = /[#&]k=([A-Za-z0-9_\-+/=]+)/.exec(location.hash || "");
+  return m ? m[1] : null;
+}
+function storedKey() {
+  try { return localStorage.getItem(KEY_STORE); } catch (e) { return null; }
+}
+function accessKey() { return keyFromUrl() || storedKey(); }
+
+function keyBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+async function gunzipJSON(u8) {
+  if (typeof DecompressionStream !== "function")
+    throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
+  const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+// Plain gzip starts 1f 8b; a sealed blob starts with the ASCII marker FDE1.
+async function openBlob(buf) {
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0x1f && u8[1] === 0x8b) return gunzipJSON(u8);
+  if (!(u8[0] === 70 && u8[1] === 68 && u8[2] === 69 && u8[3] === 49))
+    throw new Error("That file is not a directory index.");
+  const raw = accessKey();
+  if (!raw) throw Object.assign(new Error("no access key"), { code: "nokey" });
+  let plain;
+  try {
+    const key = await crypto.subtle.importKey("raw", keyBytes(raw), "AES-GCM", false, ["decrypt"]);
+    plain = new Uint8Array(await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: u8.slice(4, 16) }, key, u8.slice(16)));
+  } catch (e) {
+    throw Object.assign(new Error("wrong access key"), { code: "badkey" });
+  }
+  try { localStorage.setItem(KEY_STORE, raw); } catch (e) {}
+  if (keyFromUrl() && history.replaceState)
+    history.replaceState(null, "", location.pathname + location.search);
+  return gunzipJSON(plain);
+}
+
+function shareLink() {
+  const k = accessKey();
+  return location.origin + location.pathname + (k ? "#k=" + k : "");
+}
 
 /* ---------- load ---------- */
 
@@ -169,22 +266,58 @@ const state = { files: [], q: "", module: "All", project: "All",
 async function fetchIndex() {
   const bust = "?v=" + Date.now();
   let res = await fetch("figma-directory-data.bin" + bust);
-  if (res.ok) {
-    const buf = await res.arrayBuffer();
-    if (typeof DecompressionStream !== "function")
-      throw new Error("This browser is too old to read the index. Use a current Chrome, Edge, Firefox or Safari.");
-    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
-    return JSON.parse(await new Response(stream).text());
-  }
+  if (res.ok) return openBlob(await res.arrayBuffer());
   res = await fetch("figma-directory-data.json" + bust);
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
+}
+
+// The Jira cross-reference is a second, optional blob. It is fetched after the
+// directory has already painted, so a missing or failed file costs nothing.
+async function fetchBlob(stem) {
+  const bust = "?v=" + Date.now();
+  let res = await fetch(stem + ".bin" + bust);
+  if (res.ok) return openBlob(await res.arrayBuffer());
+  res = await fetch(stem + ".json" + bust);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function loadJira() {
+  let d;
+  try { d = await fetchBlob("jira-index"); }
+  catch (e) { return; }                       // no cross-reference published: carry on
+  const byKey = d && d.files;
+  if (!byKey) return;
+  const base = d.base || "";
+  let n = 0;
+  const seen = {};
+  for (const f of state.files) {
+    const rec = byKey[f.id];
+    const tx = (rec && rec.tickets) || [];
+    for (const t of tx) if (!t.u && base) t.u = base + t.k;
+    f._tx = tx;
+    f._ts = tx.map(t => (t.k || "") + " " + (t.t || "") + " " + (t.s || "")).join(" \u00b7 ").toLowerCase();
+    for (const t of tx) if (!seen[t.k]) { seen[t.k] = 1; n++; }
+  }
+  state.jira = true;
+  state.jiraCount = n;
+  const mi = document.getElementById("metaInfo");
+  if (mi && mi.textContent.indexOf("Jira") === -1)
+    mi.textContent += " \u00b7 " + n.toLocaleString() + " Jira tickets";
+  renderList();
 }
 
 async function load() {
   try {
     state.files = await fetchIndex();
   } catch (e) {
+    if (e && e.code === "nokey")
+      return fail("Access link needed", "This directory is private. Open it with the access link your team shares — the one ending in <code>#k=…</code>. Paste the whole thing, including everything after the #.");
+    if (e && e.code === "badkey") {
+      try { localStorage.removeItem(KEY_STORE); } catch (x) {}
+      return fail("That link no longer works", "That access key does not open this directory. It may have been rotated — ask whoever shares the link for the current one.");
+    }
     return fail("Could not load the index",
       "<code>figma-directory-data.bin</code> must sit next to this page. If the directory has not been " +
       "indexed yet, run the <b>Refresh Figma index</b> workflow in the repo's Actions tab." +
@@ -201,6 +334,7 @@ async function load() {
     f._wt = " " + (f.words || []).join(" ") + " ";
   }
   render();
+  loadJira();
 }
 
 function fail(title, body) {
@@ -262,7 +396,7 @@ function build() {
     if (state.module !== "All" && f.module !== state.module) continue;
     if (state.project !== "All" && f.projectName !== state.project) continue;
 
-    let hits = [];
+    let hits = [], tix = [], tier = 0;
     if (ts.length) {
       hits = (f.labels || []).filter(l => hasAll(l.t + " " + (f._pn[l.p] || ""), ts));
       // a page whose own name matches is worth showing even with no heading inside it
@@ -270,25 +404,31 @@ function build() {
         hits = (f.pagesData || []).filter(pg => hasAll(pg.name, ts))
                  .map(pg => ({ t: pg.name, id: pg.id, p: pg.id, _page: true }));
       }
+      // Jira: a ticket whose key, title or status carries the words. The cheap
+      // joined string is checked first so most files cost one indexOf.
+      if (state.jira && f._ts && hasAll(f._ts, ts))
+        tix = (f._tx || []).filter(t => hasAll((t.k||"") + " " + (t.t||"") + " " + (t.s||""), ts));
       const tagHit = hasAll((f.name||"") + " " + (f.module||"") + " " + (f.projectName||""), ts);
-      if (!hits.length && !tagHit) {
-        // last tier: the words appear in the text inside the file, but nothing is
-        // named for them. Still findable, just ranked and shown as weaker.
-        const textHit = ts.every(t => f.searchText.includes(t) || f._wt.includes(t));
-        if (!textHit) continue;
-        out.push({ f, hits: [], weak: true });
-        continue;
+      if (!hits.length) {
+        // screens, then the file's own name, then tickets, then loose text
+        if (tagHit) tier = 1;
+        else if (tix.length) tier = 2;
+        else {
+          const textHit = ts.every(t => f.searchText.includes(t) || f._wt.includes(t));
+          if (!textHit) continue;
+          out.push({ f, hits: [], tix: [], tier: 3, weak: true });
+          continue;
+        }
       }
     }
-    out.push({ f, hits });
+    out.push({ f, hits, tix, tier });
   }
 
   const [by, dir] = state.sort.split("-");
   out.sort((a, b) => {
     // files that actually contain a match come first, whatever the sort
     if (ts.length) {
-      const rank = x => x.hits.length ? 0 : (x.weak ? 2 : 1);   // screens, then name/tag, then text
-      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      if (a.tier !== b.tier) return a.tier - b.tier;   // screens, name/tag, tickets, text
     }
     let c = 0;
     if (by === "matches") c = a.hits.length - b.hits.length;
@@ -308,7 +448,7 @@ function render() {
 
   let h = '<div class="sw"><span class="si">&#128269;</span>' +
     '<input id="q" type="text" autocomplete="off" spellcheck="false" ' +
-    'placeholder="Search screens, sections, pages, files…" value="' + esc(state.q) + '">' +
+    'placeholder="Search screens, pages, files, Jira tickets…" value="' + esc(state.q) + '">' +
     '<span class="kbd">⌘K</span></div>';
   h += '<select id="mod"><option value="All">All modules</option>' +
     mods.map(m=>'<option value="'+esc(m)+'"'+(state.module===m?' selected':'')+'>'+esc(m)+'</option>').join('') + '</select>';
@@ -324,7 +464,7 @@ function render() {
     state.files.reduce((n,f)=>n+(f.labels||[]).length,0).toLocaleString() + " screens";
 
   const q = document.getElementById("q");
-  q.addEventListener("input", e => { state.q = e.target.value; state.expanded = {}; state.showWeak = false; renderList(); });
+  q.addEventListener("input", e => { state.q = e.target.value; state.expanded = {}; state.tixOpen = {}; state.showWeak = false; renderList(); });
   document.getElementById("mod").addEventListener("change", e => { state.module = e.target.value; renderList(); });
   document.getElementById("proj").addEventListener("change", e => { state.project = e.target.value; renderList(); });
   document.getElementById("sort").addEventListener("change", e => { state.sort = e.target.value; renderList(); });
@@ -342,12 +482,14 @@ function renderList() {
   // appear in almost every file and would bury the real matches
   const rows = (ts.length && !state.showWeak) ? all.filter(r => !r.weak) : all;
   const totalHits = rows.reduce((n,r)=>n+r.hits.length,0);
+  const totalTix  = rows.reduce((n,r)=>n+(r.tix?r.tix.length:0),0);
 
   document.getElementById("stats").innerHTML = ts.length
     ? '<span>' + rows.length + ' file' + (rows.length===1?'':'s') + ' · ' +
       totalHits.toLocaleString() + ' matching screen' + (totalHits===1?'':'s') +
+      (totalTix ? ' · ' + totalTix.toLocaleString() + ' matching ticket' + (totalTix===1?'':'s') : '') +
       (weakCount ? ' · ' + weakCount + ' more mention it in their text' : '') + '</span>' +
-      '<span>Click a screen to preview it · click the file name to open it in Figma</span>'
+      '<span>Eye = preview in the panel · arrow = open in a new tab</span>'
     : '<span>' + rows.length + ' of ' + state.files.length + ' files</span>' +
       '<span><span class="dotk" style="background:var(--fresh)"></span>Fresh &lt;30d</span>' +
       '<span><span class="dotk" style="background:var(--recent)"></span>1–3mo</span>' +
@@ -368,9 +510,17 @@ function renderList() {
     h += '<div class="card' + (sel ? ' sel' : '') + (r.weak ? ' weak' : '') + '" data-f="' + fi + '">';
     h += '<div class="ctop"><div style="min-width:0">' +
            '<a class="fname" href="' + esc(link) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a>' +
+           '<button class="ic fic" data-pv="1" data-f="' + fi + '" data-l="0" ' +
+             'title="Preview this file" aria-label="Preview">' + EYE + '</button>' +
+           '<a class="ic fic" href="' + esc(link) + '" target="_blank" rel="noopener" ' +
+             'title="Open the file in a new tab" aria-label="Open in new tab">' + EXT + '</a>' +
            '<div class="fsub">' + esc(f.projectName || "Untagged") + ' · ' +
              (f.pages||[]).length + ' pages · ' + (f.labels||[]).length + ' screens' +
              (r.hits.length ? ' · <span style="color:var(--tag)">' + r.hits.length + ' matching</span>' : '') +
+             (state.jira ? ' · ' + ((f._tx||[]).length
+                ? '<span class="tcount" data-tix="' + fi + '">' + (f._tx||[]).length +
+                  ' ticket' + ((f._tx||[]).length===1?'':'s') + '</span>'
+                : '<span style="color:var(--text-muted)">no tickets</span>') : '') +
              (r.weak ? ' · <span class="weakish">text inside this file</span>' : '') +
            '</div></div>';
     h += '<span class="tag">' + esc(f.module || "Other") + '</span>';
@@ -385,14 +535,47 @@ function renderList() {
         const idx = r.hits.indexOf(l);
         const on = sel && state.sel.li === idx;
         const page = f._pn[l.p] || "";
-        h += '<button class="chip' + (on ? ' on' : '') + '" data-f="' + fi + '" data-l="' + idx + '">' +
+        const url = figmaUrl(f.id, l.id, false);
+        h += '<span class="chip' + (on ? ' on' : '') + '" data-f="' + fi + '" data-l="' + idx + '">' +
                '<b>' + mark(l.t, ts) + '</b>' +
                (page ? '<i>· ' + esc(page) + '</i>' : '') +
-             '</button>';
+               '<button class="ic" data-pv="1" data-f="' + fi + '" data-l="' + idx + '" ' +
+                 'title="Preview in the panel" aria-label="Preview">' + EYE + '</button>' +
+               '<a class="ic" href="' + esc(url) + '" target="_blank" rel="noopener" ' +
+                 'title="Open this screen in a new tab" aria-label="Open in new tab">' + EXT + '</a>' +
+             '</span>';
       });
       if (r.hits.length > CHIP_LIMIT)
         h += '<button class="more" data-more="' + fi + '">' +
              (open ? "show fewer" : "+" + (r.hits.length - CHIP_LIMIT) + " more") + '</button>';
+      h += '</div>';
+    }
+
+    // Jira tickets: the ones that match the search, or the whole list once the
+    // ticket count in the subtitle is clicked.
+    const txAll = f._tx || [];
+    const txOpen = !!state.tixOpen[fi];
+    const txMatch = (r.tix || []).length > 0;
+    const txSrc = txMatch ? r.tix : (txOpen ? txAll : []);
+    const txShow = (txOpen || txSrc.length <= CHIP_LIMIT) ? txSrc : txSrc.slice(0, CHIP_LIMIT);
+    if (txShow.length) {
+      h += '<div class="tixw"><div class="tixh">' +
+           (txMatch ? r.tix.length + ' matching ticket' + (r.tix.length===1?'':'s')
+                    : txAll.length + ' Jira ticket' + (txAll.length===1?'':'s') + ' against this file') +
+           '</div><div class="tixc">';
+      txShow.forEach(t => {
+        h += '<a class="tchip" href="' + esc(t.u || "") + '" target="_blank" rel="noopener" ' +
+               'title="' + esc(t.s || "") + '">' +
+               '<span class="tdot" style="background:' + tcol(t.s) + '"></span>' +
+               '<b>' + mark(t.k || "", ts) + '</b>' +
+               '<u>' + mark(t.t || "", ts) + '</u></a>';
+      });
+      h += '</div>';
+      if (txSrc.length > txShow.length)
+        h += '<button class="more" data-tix="' + fi + '">+' +
+             (txSrc.length - txShow.length) + ' more</button>';
+      else if (txOpen)
+        h += '<button class="more" data-tix="' + fi + '">show fewer</button>';
       h += '</div>';
     }
     h += '</div>';
@@ -462,11 +645,19 @@ document.addEventListener("click", e => {
   const more = e.target.closest("[data-more]");
   if (more) { const fi = more.dataset.more; state.expanded[fi] = !state.expanded[fi]; renderList(); return; }
 
-  const chip = e.target.closest(".chip");
-  if (chip) { openPanel(Number(chip.dataset.f), Number(chip.dataset.l)); return; }
+  const tx = e.target.closest("[data-tix]");
+  if (tx) { e.preventDefault(); const fi = tx.dataset.tix;
+            state.tixOpen[fi] = !state.tixOpen[fi]; renderList(); return; }
+
+  const pv = e.target.closest("[data-pv]");
+  if (pv) { e.preventDefault(); openPanel(Number(pv.dataset.f), Number(pv.dataset.l)); return; }
 
   if (e.target.closest("#px")) { closePanel(); return; }
-  if (e.target.closest(".fname") || e.target.closest(".panel")) return;
+  if (e.target.closest("a")) return;            // any link opens in its own tab
+  if (e.target.closest(".panel")) return;
+
+  const chip = e.target.closest(".chip");
+  if (chip) { openPanel(Number(chip.dataset.f), Number(chip.dataset.l)); return; }
 
   const card = e.target.closest(".card");
   if (card) openPanel(Number(card.dataset.f), 0);
@@ -484,6 +675,13 @@ document.addEventListener("keydown", e => {
     const q = document.getElementById("q");
     if (q && q.value) { q.value = ""; state.q = ""; renderList(); }
   }
+});
+
+const cpl = accessKey() ? document.getElementById("cpl") : null;
+if (!accessKey()) { const b = document.getElementById("cpl"); if (b) b.style.display = "none"; }
+if (cpl) cpl.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(shareLink()); toast("Access link copied"); }
+  catch (e) { toast(shareLink()); }
 });
 
 load();
